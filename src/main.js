@@ -32,6 +32,12 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
+// Ensure the whole page is black
+document.body.style.margin = "0";
+document.body.style.padding = "0";
+document.body.style.backgroundColor = "black";
+document.body.style.overflow = "hidden";
+
 // Add orbit controls
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true; // Smooth camera movement
