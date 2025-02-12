@@ -27,7 +27,7 @@ function viridisColormap(value, limLo, limHi) {
 
 // Create the scene, camera, and renderer
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+const camera = new THREE.PerspectiveCamera(120, window.innerWidth / window.innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
@@ -36,13 +36,31 @@ document.body.appendChild(renderer.domElement);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true; // Smooth camera movement
 
-// Individual colors
+
+////////////////////////////////////////////////////////////////////////////////////////
+// Set up soft glow texture
+const canvas = document.createElement('canvas');
+canvas.width = 128;
+canvas.height = 128;
+const ctx = canvas.getContext('2d');
+const gradient = ctx.createRadialGradient(64, 64, 10, 64, 64, 64);
+gradient.addColorStop(0, 'rgba(255,255,255,0.8)');  // Bright center
+gradient.addColorStop(1, 'rgba(255,255,255,0)');  // Fade out edges
+ctx.fillStyle = gradient;
+ctx.fillRect(0, 0, 128, 128);
+const texture = new THREE.CanvasTexture(canvas);
+
 const material = new THREE.PointsMaterial({ 
-    vertexColors: true, // Enable per-point colors
-    size: 0.07,
-    transparent: true,
-    opacity: 0.8
+    vertexColors: true,
+    size: 0.05,             // Adjust as needed
+    map: texture,           // Apply soft glow texture
+    transparent: true,      // Enable transparency
+    blending: THREE.AdditiveBlending, 
+    depthWrite: false 
 });
+
+////////////////////////////////////////////////////////////////////////////////////////
+// Create point cloud from JSON file
 
 fetch('points.json')
     .then(response => response.json())
@@ -90,7 +108,7 @@ fetch('points.json')
 
 
 // Set the camera position
-camera.position.z = 20;
+camera.position.z = 10;
 
 // Handle window resizing
 window.addEventListener('resize', () => {
