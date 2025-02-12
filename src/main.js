@@ -39,7 +39,7 @@ controls.enableDamping = true; // Smooth camera movement
 // Individual colors
 const material = new THREE.PointsMaterial({ 
     vertexColors: true, // Enable per-point colors
-    size: 0.1,
+    size: 0.07,
     transparent: true,
     opacity: 0.8
 });
@@ -72,7 +72,7 @@ fetch('points.json')
             positions[i * 3 + 2] = data[i][2] - centerZ; // Z
 
             const value = positions[i * 3 + 1]; // Use X coordinate as value
-            const [r, g, b] = viridisColormap(value, -5, 5);
+            const [r, g, b] = viridisColormap(value, -4, 4);
             colors[i * 3] = r;
             colors[i * 3 + 1] = g;
             colors[i * 3 + 2] = b;
