@@ -1,4 +1,4 @@
-// This version plots the UMAP torus, adds a nice glow effect, and implements firing-rate map thumbnails with torus recoloring
+// This version plots the UMAP torus and adds a nice glow effect
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -6,70 +6,77 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
-const NUM_CELLS = 199;
-let currentSelectedCell = null;
-let defaultColors = null;
-let points;
-
 function viridisColormap(value, limLo, limHi) {
+    // Predefined Viridis colormap (interpolated from matplotlib)
     const colormap = [
         [68, 1, 84], [72, 35, 116], [64, 67, 135], [52, 94, 141],
         [41, 120, 142], [32, 144, 140], [34, 167, 132], [68, 190, 112],
         [121, 209, 81], [189, 222, 38], [253, 231, 37]
     ];
+
+    // Normalize value from [-100, 100] to [0, 1]
     let t = (value - limLo) / (limHi - limLo);
-    t = Math.max(0, Math.min(1, t));
+    t = Math.max(0, Math.min(1, t));  // Clamp to [0, 1]
     const index = Math.min(Math.floor(t * (colormap.length - 1)), colormap.length - 2);
     const mix = t * (colormap.length - 1) - index;
+
+    // Linear interpolation between two colors
     const c1 = colormap[index], c2 = colormap[index + 1];
-    return [(1 - mix) * c1[0] + mix * c2[0], (1 - mix) * c1[1] + mix * c2[1], (1 - mix) * c1[2] + mix * c2[2]].map(x => x / 255);
+    const r = (1 - mix) * c1[0] + mix * c2[0];
+    const g = (1 - mix) * c1[1] + mix * c2[1];
+    const b = (1 - mix) * c1[2] + mix * c2[2];
+
+    return [r / 255, g / 255, b / 255];  // Normalize to [0,1] for Three.js
 }
 
-function hotColormap(value, limLo, limHi) {
-    let t = (value - limLo) / (limHi - limLo);
-    t = Math.max(0, Math.min(1, t));
-    let r = Math.min(1, t * 2);
-    r = Math.max(0.1, r);
-
-    let g = Math.max(0, t * 3 - 1);
-    g = Math.max(0.1, g);
-
-    let b = Math.max(0, t * 3 - 2);
-    b = Math.max(0.1, b);
-
-    return [r, g, b];
-//     return [Math.min(1, t * 2), Math.max(0, t * 3 - 1), Math.max(0, t * 3 - 2)];
-}
-
-function singleChannelColormap(value, limLo, limHi, channel) {
-    let t = (value - limLo) / (limHi - limLo);
-    const baseValue = 0.1
-    t = Math.max(baseValue, Math.min(1, t));
-    let rgb = [baseValue, baseValue, baseValue];
-    rgb[channel] = t;
-    return rgb;
-}
-
-// Scene setup
+// Create the scene, camera, and renderer
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(120, window.innerWidth / window.innerHeight, 0.1, 1000);
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.2;
+
+const renderer = new THREE.WebGLRenderer({ 
+    antialias: true, 
+    powerPreference: "high-performance",  // Optimize for HDR rendering
+});
+renderer.outputColorSpace = THREE.SRGBColorSpace;  // Ensure proper color handling
+renderer.toneMapping = THREE.ACESFilmicToneMapping;  // Best for HDR displays
+renderer.toneMappingExposure = 1.2;  // Adjust exposure if necessary
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
-const composer = new EffectComposer(renderer);
-composer.addPass(new RenderPass(scene, camera));
-composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.0, 0.3, 0.0));
+////////////////////////////////////////////////////////////////////////////////////////
+// Post-processing with bloom effect
 
+const composer = new EffectComposer(renderer);
+composer.setSize(window.innerWidth, window.innerHeight);
+
+// Create a render pass (renders the scene normally)
+const renderPass = new RenderPass(scene, camera);
+composer.addPass(renderPass);
+
+// Create a bloom pass (controls the glowing effect)
+const bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(window.innerWidth, window.innerHeight),
+    1.0,  // 🔹 Bloom strength (increase for stronger glow)
+    0.3,  // 🔹 Bloom radius (higher values = softer glow)
+    0.0  // 🔹 Bloom threshold (only very bright areas glow)
+);
+composer.addPass(bloomPass);
+
+////////////////////////////////////////////////////////////////////////////////////////
+
+// Ensure the whole page is black
+document.body.style.margin = "0";
+document.body.style.padding = "0";
+document.body.style.backgroundColor = "black";
+document.body.style.overflow = "hidden";
+
+// Add orbit controls
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true; // Smooth camera movement
 controls.autoRotate = true; // Enable auto-rotation
 controls.autoRotateSpeed = 0.25; // 100 seconds per rotation
 controls.enablePan = false; // Disable panning
-controls.enableZoom = true; // Disable zooming
+controls.enableZoom = false; // Disable zooming
 
 
 ////////////////////////////////////////////////////////////////////////////////////////
@@ -102,6 +109,7 @@ const material = new THREE.PointsMaterial({
 fetch('points_umap.json')
     .then(response => response.json())
     .then(data => {
+
         const pointCount = data.length;
         console.log(`Loaded ${pointCount} points`);
 
@@ -131,66 +139,34 @@ fetch('points_umap.json')
             colors[i * 3 + 1] = g;
             colors[i * 3 + 2] = b;
         }
+
+        // Assign the new data to geometry
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
         geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-        points = new THREE.Points(geometry, material);
-        defaultColors = colors.slice();
+
+        // ✅ Now that geometry is ready, create and add points
+        const points = new THREE.Points(geometry, material);
         scene.add(points);
     });
 
-// Thumbnail display
-const thumbnailContainer = document.createElement('div');
-thumbnailContainer.style.position = 'absolute';
-thumbnailContainer.style.bottom = '20px';
-thumbnailContainer.style.left = '50%';
-thumbnailContainer.style.transform = 'translateX(-50%)';
-thumbnailContainer.style.display = 'grid';
-thumbnailContainer.style.gridTemplateColumns = 'repeat(auto-fit, minmax(40px, 1fr))';
-thumbnailContainer.style.gap = '5px';
-thumbnailContainer.style.maxWidth = '80vw';
-thumbnailContainer.style.justifyContent = 'center';
-document.body.appendChild(thumbnailContainer);
 
-for (let cellID = 1; cellID <= NUM_CELLS; cellID++) {
-    const img = document.createElement('img');
-    img.src = `rm/${cellID}.png`;
-    img.style.width = '40px';
-    img.style.height = '40px';
-    img.style.cursor = 'pointer';
-    img.style.border = '2px solid transparent';
-    img.addEventListener('mouseenter', () => img.style.border = '2px solid white');
-    img.addEventListener('mouseleave', () => img.style.border = '2px solid transparent');
-    img.addEventListener('click', () => toggleTorusColoring(cellID));
-    thumbnailContainer.appendChild(img);
-}
-
-function toggleTorusColoring(cellID) {
-    if (currentSelectedCell === cellID) {
-        points.geometry.attributes.color.array.set(defaultColors);
-        points.geometry.attributes.color.needsUpdate = true;
-        currentSelectedCell = null;
-        return;
-    }
-    fetch(`fr/${cellID}.bin`)
-        .then(response => response.arrayBuffer())
-        .then(buffer => {
-            const firingRates = new Float32Array(buffer);
-            const colors = points.geometry.attributes.color.array;
-            for (let i = 0; i < firingRates.length; i++) {
-                const [r, g, b] = hotColormap(firingRates[i], 0, 1);
-                // const [r, g, b] = singleChannelColormap(firingRates[i], 0, 1, 0);
-                colors.set([r, g, b], i * 3);
-            }
-            points.geometry.attributes.color.needsUpdate = true;
-            currentSelectedCell = cellID;
-        });
-}
-
+// Set the camera position
 camera.position.z = 10;
-function animate() {
+
+// Handle window resizing
+window.addEventListener('resize', () => {
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    composer.setSize(window.innerWidth, window.innerHeight);
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+});
+
+// Animation loop
+const animate = () => {
     requestAnimationFrame(animate);
-    controls.update();
-    composer.render();
-}
+    controls.update(); // Update camera controls
+    // renderer.render(scene, camera);
+    composer.render();  // Use the composer instead of renderer
+};
 animate();
