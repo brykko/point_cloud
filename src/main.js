@@ -7,9 +7,15 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
 const NUM_CELLS = 199;
+const MAX_SELECTED_CELLS = 3;
 let currentSelectedCell = null;
 let defaultColors = null;
 let points;
+
+let selectedCells = [];
+let colormapAssignments = {};
+let thumbnailElements = {};
+const colormaps = [hotColormap, coolColormap, magentaColormap];
 
 function viridisColormap(value, limLo, limHi) {
     const colormap = [
@@ -25,22 +31,6 @@ function viridisColormap(value, limLo, limHi) {
     return [(1 - mix) * c1[0] + mix * c2[0], (1 - mix) * c1[1] + mix * c2[1], (1 - mix) * c1[2] + mix * c2[2]].map(x => x / 255);
 }
 
-function hotColormap(value, limLo, limHi) {
-    let t = (value - limLo) / (limHi - limLo);
-    t = Math.max(0, Math.min(1, t));
-    let r = Math.min(1, t * 2);
-    r = Math.max(0.1, r);
-
-    let g = Math.max(0, t * 3 - 1);
-    g = Math.max(0.1, g);
-
-    let b = Math.max(0, t * 3 - 2);
-    b = Math.max(0.1, b);
-
-    return [r, g, b];
-//     return [Math.min(1, t * 2), Math.max(0, t * 3 - 1), Math.max(0, t * 3 - 2)];
-}
-
 function singleChannelColormap(value, limLo, limHi, channel) {
     let t = (value - limLo) / (limHi - limLo);
     const baseValue = 0.1
@@ -49,6 +39,64 @@ function singleChannelColormap(value, limLo, limHi, channel) {
     rgb[channel] = t;
     return rgb;
 }
+
+// function hotColormap(value) {
+//     let t = Math.max(0, Math.min(1, value));
+//     return [Math.min(1, t * 3), Math.max(0, Math.min(1, t * 3 - 1)), Math.max(0, Math.min(1, t * 3 - 2))];
+// }
+
+// function coolColormap(value) {
+//     let t = Math.max(0, Math.min(1, value));
+//     return [Math.max(0, Math.min(1, t * 2 - 1)), Math.max(0, Math.min(1, t * 3)), Math.min(1, t * 3)];
+// }
+// 
+// function magentaColormap(value) {
+//     let t = Math.max(0, Math.min(1, value));
+//     return [Math.max(0, Math.min(1, t * 3 - 1)), Math.max(0, Math.min(1, t * 3 - 2)), Math.min(1, t * 3)];
+// }
+
+function hotColormap(value) {
+    let t = Math.max(0, Math.min(1, value));
+    return [Math.min(1, t * 2), Math.max(0, Math.min(1, t * 3 - 1)), 0];
+}
+
+function coolColormap(value) {
+    let t = Math.max(0, Math.min(1, value));
+    return [0, Math.max(0, Math.min(1, t * 3 - 1)), Math.min(1, t * 3)];
+}
+
+function magentaColormap(value) {
+    let t = Math.max(0, Math.min(1, value));
+    return [Math.max(0, Math.min(1, t * 3 - 1)), 0, Math.max(0, Math.min(1, t * 2 - 1)) ];
+    // return [Math.max(0, Math.min(1, t * 3 - 1)), Math.max(0, Math.min(1, t * 3 - 2)), Math.min(1, t * 3)];
+}
+
+function updateThumbnailBorders() {
+    Object.keys(thumbnailElements).forEach(cellID => {
+        const img = thumbnailElements[cellID];
+        if (selectedCells.includes(parseInt(cellID))) {
+            const colormap = colormapAssignments[cellID];
+            img.style.border = `2px solid rgb(${colormap(0.75).map(v => v * 255).join(',')})`;
+        } else {
+            img.style.border = '2px solid transparent';
+        }
+    });
+}
+
+// function updateThumbnailBorders() {
+//     Object.keys(thumbnailElements).forEach(cellID => {
+//         const img = thumbnailElements[cellID];
+//         if (selectedCells.includes(parseInt(cellID))) {
+//             const colormap = colormapAssignments[cellID];
+//             const midColor = colormap(0.75).map(v => Math.round(v * 255));
+//             console.log(midColor);
+//             img.style.border = `2px solid rgb(${midColor[0]}, ${midColor[1]}, ${midColor[2]})`;
+//         } else {
+//             img.style.border = '2px solid transparent';
+//         }
+//     });
+// }
+
 
 // Scene setup
 const scene = new THREE.Scene();
@@ -62,7 +110,7 @@ document.body.appendChild(renderer.domElement);
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.0, 0.3, 0.0));
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1, 1, 0.0)); // strength, radius, threshold
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true; // Smooth camera movement
@@ -146,45 +194,83 @@ thumbnailContainer.style.bottom = '20px';
 thumbnailContainer.style.left = '50%';
 thumbnailContainer.style.transform = 'translateX(-50%)';
 thumbnailContainer.style.display = 'grid';
-thumbnailContainer.style.gridTemplateColumns = 'repeat(auto-fit, minmax(40px, 1fr))';
+thumbnailContainer.style.gridTemplateColumns = 'repeat(auto-fit, minmax(80px, 1fr))';
 thumbnailContainer.style.gap = '5px';
 thumbnailContainer.style.maxWidth = '80vw';
 thumbnailContainer.style.justifyContent = 'center';
 document.body.appendChild(thumbnailContainer);
 
-for (let cellID = 1; cellID <= NUM_CELLS; cellID++) {
-    const img = document.createElement('img');
-    img.src = `rm/${cellID}.png`;
-    img.style.width = '40px';
-    img.style.height = '40px';
-    img.style.cursor = 'pointer';
-    img.style.border = '2px solid transparent';
-    img.addEventListener('mouseenter', () => img.style.border = '2px solid white');
-    img.addEventListener('mouseleave', () => img.style.border = '2px solid transparent');
-    img.addEventListener('click', () => toggleTorusColoring(cellID));
-    thumbnailContainer.appendChild(img);
-}
+fetch('cell_list.txt')
+    .then(response => response.text())
+    .then(text => {
+        const cellIDs = text.split('\n').map(line => line.trim()).filter(line => line !== '');
+        cellIDs.forEach(cellID => {
+            const img = document.createElement('img');
+            img.src = `rm/${cellID}.png`;
+            img.style.width = '80px';
+            img.style.height = '80px';
+            img.style.cursor = 'pointer';
+            img.style.border = '2px solid transparent';
+            img.addEventListener('click', () => toggleTorusColoring(parseInt(cellID)));
+            thumbnailContainer.appendChild(img);
+            thumbnailElements[cellID] = img;
+        });
+    });
+
+// for (let cellID = 1; cellID <= NUM_CELLS; cellID++) {
+//     const img = document.createElement('img');
+//     img.src = `rm/${cellID}.png`;
+//     img.style.width = '40px';
+//     img.style.height = '40px';
+//     img.style.cursor = 'pointer';
+//     img.style.border = '2px solid transparent';
+//     // img.addEventListener('mouseenter', () => img.style.border = '2px solid white');
+//     // img.addEventListener('mouseleave', () => img.style.border = '2px solid transparent');
+//     img.addEventListener('click', () => toggleTorusColoring(cellID, img));
+//     thumbnailContainer.appendChild(img);
+//     thumbnailElements[cellID] = img;
+// }
 
 function toggleTorusColoring(cellID) {
-    if (currentSelectedCell === cellID) {
+    if (selectedCells.includes(cellID)) {
+        selectedCells = selectedCells.filter(id => id !== cellID);
+        delete colormapAssignments[cellID];
+        // img.style.border = '2px solid transparent';
+    } else {
+        if (selectedCells.length >= MAX_SELECTED_CELLS) return;
+        selectedCells.push(cellID);
+        colormapAssignments[cellID] = colormaps[selectedCells.length - 1];
+        // img.style.border = `2px solid rgb(${colormapAssignments[cellID](1).map(v => v * 255).join(',')})`;
+    }
+    updateThumbnailBorders();
+    updateTorusColors();
+}
+
+function updateTorusColors() {
+    if (selectedCells.length === 0) {
         points.geometry.attributes.color.array.set(defaultColors);
         points.geometry.attributes.color.needsUpdate = true;
-        currentSelectedCell = null;
         return;
     }
-    fetch(`fr/${cellID}.bin`)
-        .then(response => response.arrayBuffer())
-        .then(buffer => {
-            const firingRates = new Float32Array(buffer);
-            const colors = points.geometry.attributes.color.array;
-            for (let i = 0; i < firingRates.length; i++) {
-                const [r, g, b] = hotColormap(firingRates[i], 0, 1);
-                // const [r, g, b] = singleChannelColormap(firingRates[i], 0, 1, 0);
-                colors.set([r, g, b], i * 3);
-            }
-            points.geometry.attributes.color.needsUpdate = true;
-            currentSelectedCell = cellID;
-        });
+    
+    const pointCount = points.geometry.attributes.position.count;
+    const colors = new Float32Array(pointCount * 3).fill(0.1);
+    selectedCells.forEach(cellID => {
+        fetch(`fr/${cellID}.bin`)
+            .then(response => response.arrayBuffer())
+            .then(buffer => {
+                const firingRates = new Float32Array(buffer);
+                const colormap = colormapAssignments[cellID];
+                for (let i = 0; i < pointCount; i++) {
+                    const [r, g, b] = colormap(firingRates[i]);
+                    colors[i * 3] += r;
+                    colors[i * 3 + 1] += g;
+                    colors[i * 3 + 2] += b;
+                }
+                points.geometry.attributes.color.array.set(colors);
+                points.geometry.attributes.color.needsUpdate = true;
+            });
+    });
 }
 
 camera.position.z = 10;
