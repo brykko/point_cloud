@@ -82,7 +82,7 @@ composer2d.addPass(new RenderPass(scene2d, camera2d));
 composer2d.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.0, 0.3, 0.0));
 composer2d.setSize(window.innerWidth / 2, window.innerHeight);
 
-window.addEventListener('resize', () => {
+function onWindowResize() {
     const width = window.innerWidth;
     const height = window.innerHeight;
 
@@ -107,8 +107,9 @@ window.addEventListener('resize', () => {
     // ✅ Adjust point size dynamically based on viewport size
     materialTorus.size = BASE_POINT_SIZE_TORUS * scaleFactor; 
     material2d.size = BASE_POINT_SIZE_2D * scaleFactor;
+};
 
-});
+window.addEventListener('resize', onWindowResize);
 
 const controlsTorus = new OrbitControls(cameraTorus, renderer.domElement);
 controlsTorus.enableDamping = true;
@@ -296,6 +297,9 @@ function updateTorusColors(points) {
 
 cameraTorus.position.z = 10;
 camera2d.position.z = 1;
+
+// Wait for plot data to load before setting plot sizes
+setTimeout(function(){onWindowResize();}, 100);
 
 function animate() {
     requestAnimationFrame(animate);
