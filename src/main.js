@@ -8,6 +8,9 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 
 const NUM_CELLS = 199;
 const MAX_SELECTED_CELLS = 3;
+const BASE_POINT_SIZE_TORUS = 0.075;
+const BASE_POINT_SIZE_2D = 0.0075;
+
 let currentSelectedCell = null;
 let defaultColors = null;
 let points;
@@ -58,7 +61,7 @@ function updateThumbnailBorders() {
     });
 }
 
-let torusPoints, positionPoints;
+let pointsTorus, points2d;
 
 const sceneTorus = new THREE.Scene();
 const scene2d = new THREE.Scene();
@@ -79,10 +82,38 @@ composer2d.addPass(new RenderPass(scene2d, camera2d));
 composer2d.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.0, 0.3, 0.0));
 composer2d.setSize(window.innerWidth / 2, window.innerHeight);
 
+window.addEventListener('resize', () => {
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+
+    // ✅ Update camera aspect ratios
+    cameraTorus.aspect = (width / 2) / height;
+    camera2d.aspect = (width / 2) / height;
+    cameraTorus.updateProjectionMatrix();
+    camera2d.updateProjectionMatrix();
+
+    // ✅ Update renderer size
+    renderer.setSize(width, height);
+
+    // ✅ Update the composers to match new viewport sizes
+    composerTorus.setSize(width / 2, height);
+    composer2d.setSize(width / 2, height);
+
+    // ✅ Apply the scaling factor to both point clouds
+    const scaleFactor = Math.min(width / 1920, height / 1080);  // Adjust scaling reference as needed
+    if (pointsTorus) pointsTorus.scale.set(scaleFactor, scaleFactor, scaleFactor);
+    if (points2d) points2d.scale.set(scaleFactor, scaleFactor, scaleFactor);
+
+    // ✅ Adjust point size dynamically based on viewport size
+    materialTorus.size = BASE_POINT_SIZE_TORUS * scaleFactor; 
+    material2d.size = BASE_POINT_SIZE_2D * scaleFactor;
+
+});
+
 const controlsTorus = new OrbitControls(cameraTorus, renderer.domElement);
 controlsTorus.enableDamping = true;
 controlsTorus.autoRotate = true;
-controlsTorus.autoRotateSpeed = 0.25;
+controlsTorus.autoRotateSpeed = 1;
 controlsTorus.enablePan = false;
 controlsTorus.enableZoom = true;
 
@@ -109,7 +140,7 @@ texture.encoding = THREE.SRGBColorSpace;  // Ensure correct color representation
 
 const materialTorus = new THREE.PointsMaterial({ 
     vertexColors: true,
-    size: 0.075,
+    size: BASE_POINT_SIZE_TORUS,
     map: texture,           // Apply soft glow texture
     transparent: true,      // Enable transparency
     blending: THREE.AdditiveBlending,
@@ -119,7 +150,7 @@ const materialTorus = new THREE.PointsMaterial({
 // const material2d = new THREE.PointsMaterial({size: 0.003, vertexColors: true});
 
 const material2d = new THREE.PointsMaterial({
-    size: 0.0075,
+    size: BASE_POINT_SIZE_2D,
     vertexColors: true,
     map: texture,         // Use the same canvas texture
     transparent: true     // Allow the circular alpha gradient to work
@@ -140,7 +171,6 @@ function loadPointCloud(scene, file, onLoadCallback, is2D, material) {
                 sumX += data[i][0];
                 sumY += data[i][1];
                 sumZ += is2D ? 0 : data[i][2];
-                // sumZ += data[i][2];
             }
 
             // Compute centroid (average position)
@@ -168,7 +198,6 @@ function setPointColors(points, data, dim) {
     const pointCount = points.geometry.attributes.position.count;
     const colors = new Float32Array(pointCount * 3);
     for (let i = 0; i < pointCount; i++) {
-        // console.log(data[i][dim]);
         const [r, g, b] = viridisColormap(data[i*3 + dim], -4, 4);
         colors.set([r, g, b], i * 3);
     }
@@ -183,24 +212,23 @@ function setPointColors(points, data, dim) {
 
 let torusData = null; // Store the torus data globally
 
-loadPointCloud(sceneTorus, 'points_umap.json', (points, positions) => { 
-    torusPoints = points;
+loadPointCloud(sceneTorus, './points_umap.json', (points, positions) => { 
+    pointsTorus = points;
     torusData = positions; // ✅ Save torus data globally
     console.log(torusData);
-    setPointColors(torusPoints, torusData, 1); 
+    setPointColors(pointsTorus, torusData, 1); 
 }, false, materialTorus);
 
-loadPointCloud(scene2d, 'points_2d.json', (points, positions) => { 
-    positionPoints = points;
+loadPointCloud(scene2d, './points_2d.json', (points, positions) => { 
+    points2d = points;
     setTimeout(function(){
-        setPointColors(positionPoints, torusData, 1);
+        setPointColors(points2d, torusData, 1);
     }, 100) // Delay to ensure torusData is loaded
 }, true, material2d);
 
-// Thumbnail display
 const thumbnailContainer = document.createElement('div');
 thumbnailContainer.style.position = 'absolute';
-thumbnailContainer.style.bottom = '20px';
+thumbnailContainer.style.top = `${window.innerHeight * 0.75}px`;  // ✅ Start below the plots
 thumbnailContainer.style.left = '50%';
 thumbnailContainer.style.transform = 'translateX(-50%)';
 thumbnailContainer.style.display = 'grid';
@@ -217,10 +245,8 @@ fetch('cell_list.txt')
         cellIDs.forEach(cellID => {
             const img = document.createElement('img');
             img.src = `rm/${cellID}.png`;
-            img.style.width = '80px';
-            img.style.height = '80px';
-            img.style.cursor = 'pointer';
-            img.style.border = '2px solid transparent';
+            img.style.transform = 'rotate(-90deg)';  // ✅ Rotate counter-clockwise
+            img.classList.add('thumbnail');  // ✅ Apply the CSS class
             img.addEventListener('click', () => toggleTorusColoring(parseInt(cellID)));
             thumbnailContainer.appendChild(img);
             thumbnailElements[cellID] = img;
@@ -231,16 +257,14 @@ function toggleTorusColoring(cellID) {
     if (selectedCells.includes(cellID)) {
         selectedCells = selectedCells.filter(id => id !== cellID);
         delete colormapAssignments[cellID];
-        // img.style.border = '2px solid transparent';
     } else {
         if (selectedCells.length >= MAX_SELECTED_CELLS) return;
         selectedCells.push(cellID);
         colormapAssignments[cellID] = colormaps[selectedCells.length - 1];
-        // img.style.border = `2px solid rgb(${colormapAssignments[cellID](1).map(v => v * 255).join(',')})`;
     }
     updateThumbnailBorders();
-    updateTorusColors(torusPoints);
-    updateTorusColors(positionPoints);
+    updateTorusColors(pointsTorus);
+    updateTorusColors(points2d);
 }
 
 function updateTorusColors(points) {
@@ -253,7 +277,7 @@ function updateTorusColors(points) {
     const pointCount = points.geometry.attributes.position.count;
     const colors = new Float32Array(pointCount * 3).fill(0.1);
     selectedCells.forEach(cellID => {
-        fetch(`fr/${cellID}.bin`)
+        fetch(`./fr/${cellID}.bin`)
             .then(response => response.arrayBuffer())
             .then(buffer => {
                 const firingRates = new Float32Array(buffer);
@@ -279,11 +303,8 @@ function animate() {
 
     renderer.setScissorTest(true);
 
-    // renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setScissor(0, 0, window.innerWidth / 2, window.innerHeight);
-    // renderer.setScissor(0, 0, window.innerWidth, window.innerHeight);
     renderer.setViewport(0, 0, window.innerWidth / 2, window.innerHeight);
-    // renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
     composerTorus.render();
 
     renderer.setScissor(window.innerWidth / 2, 0, window.innerWidth / 2, window.innerHeight);

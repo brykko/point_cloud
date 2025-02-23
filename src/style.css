@@ -69,6 +69,13 @@ h1 {
   color: #888;
 }
 
+.thumbnail {
+  width: 80px;  /* Thumbnail size */
+  height: 80px;
+  cursor: pointer;
+  border: 2px solid transparent;  /* Default border */
+}
+
 button {
   border-radius: 8px;
   border: 1px solid transparent;
