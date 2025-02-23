@@ -295,8 +295,8 @@ function updateTorusColors(points) {
     });
 }
 
-cameraTorus.position.z = 10;
-camera2d.position.z = 1;
+cameraTorus.position.z = 8;
+camera2d.position.z = 0.8;
 
 // Wait for plot data to load before setting plot sizes
 setTimeout(function(){onWindowResize();}, 100);
