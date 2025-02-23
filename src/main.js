@@ -31,30 +31,6 @@ function viridisColormap(value, limLo, limHi) {
     return [(1 - mix) * c1[0] + mix * c2[0], (1 - mix) * c1[1] + mix * c2[1], (1 - mix) * c1[2] + mix * c2[2]].map(x => x / 255);
 }
 
-function singleChannelColormap(value, limLo, limHi, channel) {
-    let t = (value - limLo) / (limHi - limLo);
-    const baseValue = 0.1
-    t = Math.max(baseValue, Math.min(1, t));
-    let rgb = [baseValue, baseValue, baseValue];
-    rgb[channel] = t;
-    return rgb;
-}
-
-// function hotColormap(value) {
-//     let t = Math.max(0, Math.min(1, value));
-//     return [Math.min(1, t * 3), Math.max(0, Math.min(1, t * 3 - 1)), Math.max(0, Math.min(1, t * 3 - 2))];
-// }
-
-// function coolColormap(value) {
-//     let t = Math.max(0, Math.min(1, value));
-//     return [Math.max(0, Math.min(1, t * 2 - 1)), Math.max(0, Math.min(1, t * 3)), Math.min(1, t * 3)];
-// }
-// 
-// function magentaColormap(value) {
-//     let t = Math.max(0, Math.min(1, value));
-//     return [Math.max(0, Math.min(1, t * 3 - 1)), Math.max(0, Math.min(1, t * 3 - 2)), Math.min(1, t * 3)];
-// }
-
 function hotColormap(value) {
     let t = Math.max(0, Math.min(1, value));
     return [Math.min(1, t * 2), Math.max(0, Math.min(1, t * 3 - 1)), 0];
@@ -68,7 +44,6 @@ function coolColormap(value) {
 function magentaColormap(value) {
     let t = Math.max(0, Math.min(1, value));
     return [Math.max(0, Math.min(1, t * 3 - 1)), 0, Math.max(0, Math.min(1, t * 2 - 1)) ];
-    // return [Math.max(0, Math.min(1, t * 3 - 1)), Math.max(0, Math.min(1, t * 3 - 2)), Math.min(1, t * 3)];
 }
 
 function updateThumbnailBorders() {
@@ -83,42 +58,37 @@ function updateThumbnailBorders() {
     });
 }
 
-// function updateThumbnailBorders() {
-//     Object.keys(thumbnailElements).forEach(cellID => {
-//         const img = thumbnailElements[cellID];
-//         if (selectedCells.includes(parseInt(cellID))) {
-//             const colormap = colormapAssignments[cellID];
-//             const midColor = colormap(0.75).map(v => Math.round(v * 255));
-//             console.log(midColor);
-//             img.style.border = `2px solid rgb(${midColor[0]}, ${midColor[1]}, ${midColor[2]})`;
-//         } else {
-//             img.style.border = '2px solid transparent';
-//         }
-//     });
-// }
+let torusPoints, positionPoints;
 
+const sceneTorus = new THREE.Scene();
+const scene2d = new THREE.Scene();
+const cameraTorus = new THREE.PerspectiveCamera(120, window.innerWidth / (2 * window.innerHeight), 0.1, 1000);
+const camera2d = new THREE.PerspectiveCamera(120, window.innerWidth / (2 * window.innerHeight), 0.1, 1000);
 
-// Scene setup
-const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(120, window.innerWidth / window.innerHeight, 0.1, 1000);
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.2;
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
-const composer = new EffectComposer(renderer);
-composer.addPass(new RenderPass(scene, camera));
-composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1, 1, 0.0)); // strength, radius, threshold
+const composerTorus = new EffectComposer(renderer);
+composerTorus.addPass(new RenderPass(sceneTorus, cameraTorus));
+composerTorus.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.0, 0.3, 0.0));
 
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true; // Smooth camera movement
-controls.autoRotate = true; // Enable auto-rotation
-controls.autoRotateSpeed = 0.25; // 100 seconds per rotation
-controls.enablePan = false; // Disable panning
-controls.enableZoom = true; // Disable zooming
+const composer2d = new EffectComposer(renderer);
+composer2d.addPass(new RenderPass(scene2d, camera2d));
+composer2d.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.0, 0.3, 0.0));
 
+const controlsTorus = new OrbitControls(cameraTorus, renderer.domElement);
+controlsTorus.enableDamping = true;
+controlsTorus.autoRotate = true;
+controlsTorus.autoRotateSpeed = 0.25;
+controlsTorus.enablePan = false;
+controlsTorus.enableZoom = true;
+
+const controls2d = new OrbitControls(camera2d, renderer.domElement);
+controls2d.enableDamping = true;
+controls2d.enableRotate = false;
+controls2d.enablePan = false;
+controls2d.enableZoom = false;
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // Set up soft glow texture
@@ -135,57 +105,95 @@ ctx.fillRect(0, 0, 128, 128);
 const texture = new THREE.CanvasTexture(canvas);
 texture.encoding = THREE.SRGBColorSpace;  // Ensure correct color representation
 
-const material = new THREE.PointsMaterial({ 
+const materialTorus = new THREE.PointsMaterial({ 
     vertexColors: true,
-    size: 0.05,
+    size: 0.1,
     map: texture,           // Apply soft glow texture
     transparent: true,      // Enable transparency
     blending: THREE.AdditiveBlending,
-    depthWrite: false, 
+    depthWrite: false
 });
+
+// const material2d = new THREE.PointsMaterial({size: 0.003, vertexColors: true});
+
+const material2d = new THREE.PointsMaterial({
+    size: 0.01,
+    vertexColors: true,
+    map: texture,         // Use the same canvas texture
+    transparent: true     // Allow the circular alpha gradient to work
+  });
 
 ////////////////////////////////////////////////////////////////////////////////////////
 // Create point cloud from JSON file
 
-fetch('points_umap.json')
-    .then(response => response.json())
-    .then(data => {
-        const pointCount = data.length;
-        console.log(`Loaded ${pointCount} points`);
+function loadPointCloud(scene, file, onLoadCallback, is2D, material) {
+    fetch(file)
+        .then(response => response.json())
+        .then(data => {
+            const pointCount = data.length;
 
-        // Compute sum of all coordinates
-        let sumX = 0, sumY = 0, sumZ = 0;
-        for (let i = 0; i < pointCount; i++) {
-            sumX += data[i][0];
-            sumY += data[i][1];
-            sumZ += data[i][2];
-        }
-        // Compute centroid (average position)
-        const centerX = sumX / pointCount;
-        const centerY = sumY / pointCount;
-        const centerZ = sumZ / pointCount;
-        console.log("Centroid:", centerX, centerY, centerZ); // Debugging
+            // Compute sum of all coordinates
+            let sumX = 0, sumY = 0, sumZ = 0;
+            for (let i = 0; i < pointCount; i++) {
+                sumX += data[i][0];
+                sumY += data[i][1];
+                sumZ += is2D ? 0 : data[i][2];
+                // sumZ += data[i][2];
+            }
 
-        const colors = new Float32Array(pointCount * 3);
-        const positions = new Float32Array(pointCount * 3);
-        for (let i = 0; i < pointCount; i++) {
-            positions[i * 3] = data[i][0] - centerX; // X
-            positions[i * 3 + 1] = data[i][1] - centerY; // Y
-            positions[i * 3 + 2] = data[i][2] - centerZ; // Z
+            // Compute centroid (average position)
+            const centerX = sumX / pointCount;
+            const centerY = sumY / pointCount;
+            const centerZ = sumZ / pointCount;
+            console.log("Centroid:", centerX, centerY, centerZ); // Debugging
 
-            const value = positions[i * 3 + 1]; // Use X coordinate as value
-            const [r, g, b] = viridisColormap(value, -4, 4);
-            colors[i * 3] = r;
-            colors[i * 3 + 1] = g;
-            colors[i * 3 + 2] = b;
-        }
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-        points = new THREE.Points(geometry, material);
+            const positions = new Float32Array(pointCount * 3);
+            for (let i = 0; i < pointCount; i++) {
+                positions[i * 3]     = data[i][0] - centerX;
+                positions[i * 3 + 1] = data[i][1] - centerY;
+                positions[i * 3 + 2] = is2D ? 0 : data[i][2] - centerZ;
+            }
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            // geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+            const points = new THREE.Points(geometry, material);
+            scene.add(points);
+            onLoadCallback(points, positions);
+        });
+}
+
+function setPointColors(points, data, dim) {
+    const pointCount = points.geometry.attributes.position.count;
+    const colors = new Float32Array(pointCount * 3);
+    for (let i = 0; i < pointCount; i++) {
+        // console.log(data[i][dim]);
+        const [r, g, b] = viridisColormap(data[i*3 + dim], -4, 4);
+        colors.set([r, g, b], i * 3);
+    }
+    points.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    // Set default colors if not already set
+    if (!defaultColors) {
         defaultColors = colors.slice();
-        scene.add(points);
-    });
+    }
+
+}
+
+let torusData = null; // Store the torus data globally
+
+loadPointCloud(sceneTorus, 'points_umap.json', (points, positions) => { 
+    torusPoints = points;
+    torusData = positions; // ✅ Save torus data globally
+    console.log(torusData);
+    setPointColors(torusPoints, torusData, 1); 
+}, false, materialTorus);
+
+loadPointCloud(scene2d, 'points_2d.json', (points, positions) => { 
+    positionPoints = points;
+    setTimeout(function(){
+        setPointColors(positionPoints, torusData, 1);
+    }, 100) // Delay to ensure torusData is loaded
+}, true, material2d);
 
 // Thumbnail display
 const thumbnailContainer = document.createElement('div');
@@ -217,20 +225,6 @@ fetch('cell_list.txt')
         });
     });
 
-// for (let cellID = 1; cellID <= NUM_CELLS; cellID++) {
-//     const img = document.createElement('img');
-//     img.src = `rm/${cellID}.png`;
-//     img.style.width = '40px';
-//     img.style.height = '40px';
-//     img.style.cursor = 'pointer';
-//     img.style.border = '2px solid transparent';
-//     // img.addEventListener('mouseenter', () => img.style.border = '2px solid white');
-//     // img.addEventListener('mouseleave', () => img.style.border = '2px solid transparent');
-//     img.addEventListener('click', () => toggleTorusColoring(cellID, img));
-//     thumbnailContainer.appendChild(img);
-//     thumbnailElements[cellID] = img;
-// }
-
 function toggleTorusColoring(cellID) {
     if (selectedCells.includes(cellID)) {
         selectedCells = selectedCells.filter(id => id !== cellID);
@@ -243,10 +237,11 @@ function toggleTorusColoring(cellID) {
         // img.style.border = `2px solid rgb(${colormapAssignments[cellID](1).map(v => v * 255).join(',')})`;
     }
     updateThumbnailBorders();
-    updateTorusColors();
+    updateTorusColors(torusPoints);
+    updateTorusColors(positionPoints);
 }
 
-function updateTorusColors() {
+function updateTorusColors(points) {
     if (selectedCells.length === 0) {
         points.geometry.attributes.color.array.set(defaultColors);
         points.geometry.attributes.color.needsUpdate = true;
@@ -273,10 +268,23 @@ function updateTorusColors() {
     });
 }
 
-camera.position.z = 10;
+cameraTorus.position.z = 10;
+camera2d.position.z = 1;
+
 function animate() {
     requestAnimationFrame(animate);
-    controls.update();
-    composer.render();
+    controlsTorus.update();
+
+    renderer.setScissorTest(true);
+
+    renderer.setScissor(0, 0, window.innerWidth / 2, window.innerHeight);
+    renderer.setViewport(0, 0, window.innerWidth / 2, window.innerHeight);
+    composerTorus.render();
+
+    renderer.setScissor(window.innerWidth / 2, 0, window.innerWidth / 2, window.innerHeight);
+    renderer.setViewport(window.innerWidth / 2, 0, window.innerWidth / 2, window.innerHeight);
+    composer2d.render();
+
+    renderer.setScissorTest(false);
 }
 animate();
