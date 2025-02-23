@@ -71,11 +71,13 @@ document.body.appendChild(renderer.domElement);
 
 const composerTorus = new EffectComposer(renderer);
 composerTorus.addPass(new RenderPass(sceneTorus, cameraTorus));
-composerTorus.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.0, 0.3, 0.0));
+composerTorus.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.5, 0.3, 0.0));
+composerTorus.setSize(window.innerWidth / 2, window.innerHeight); // must be consistent with the viewport size, otherwise dots will be stretched
 
 const composer2d = new EffectComposer(renderer);
 composer2d.addPass(new RenderPass(scene2d, camera2d));
 composer2d.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.0, 0.3, 0.0));
+composer2d.setSize(window.innerWidth / 2, window.innerHeight);
 
 const controlsTorus = new OrbitControls(cameraTorus, renderer.domElement);
 controlsTorus.enableDamping = true;
@@ -107,7 +109,7 @@ texture.encoding = THREE.SRGBColorSpace;  // Ensure correct color representation
 
 const materialTorus = new THREE.PointsMaterial({ 
     vertexColors: true,
-    size: 0.1,
+    size: 0.075,
     map: texture,           // Apply soft glow texture
     transparent: true,      // Enable transparency
     blending: THREE.AdditiveBlending,
@@ -117,7 +119,7 @@ const materialTorus = new THREE.PointsMaterial({
 // const material2d = new THREE.PointsMaterial({size: 0.003, vertexColors: true});
 
 const material2d = new THREE.PointsMaterial({
-    size: 0.01,
+    size: 0.0075,
     vertexColors: true,
     map: texture,         // Use the same canvas texture
     transparent: true     // Allow the circular alpha gradient to work
@@ -277,8 +279,11 @@ function animate() {
 
     renderer.setScissorTest(true);
 
+    // renderer.setPixelRatio(window.devicePixelRatio);
     renderer.setScissor(0, 0, window.innerWidth / 2, window.innerHeight);
+    // renderer.setScissor(0, 0, window.innerWidth, window.innerHeight);
     renderer.setViewport(0, 0, window.innerWidth / 2, window.innerHeight);
+    // renderer.setViewport(0, 0, window.innerWidth, window.innerHeight);
     composerTorus.render();
 
     renderer.setScissor(window.innerWidth / 2, 0, window.innerWidth / 2, window.innerHeight);
