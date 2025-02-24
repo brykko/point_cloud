@@ -299,10 +299,18 @@ function updateTorusColors(points) {
 cameraTorus.position.z = 8;
 camera2d.position.z = 0.8;
 
-// Wait for plot data to load before setting plot sizes
-setTimeout(function(){onWindowResize();}, 100);
+// // Wait for plot data to load before setting plot sizes
+// setTimeout(function(){onWindowResize();}, 200);
+
+let initialSizeSet = false;
 
 function animate() {
+
+    if (!initialSizeSet && pointsTorus && points2d) {
+        onWindowResize();
+        initialSizeSet = true;
+    }
+
     requestAnimationFrame(animate);
     controlsTorus.update();
 
