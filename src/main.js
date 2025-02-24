@@ -100,8 +100,8 @@ function onWindowResize() {
     composerTorus.setSize(width / 2, height);
     composer2d.setSize(width / 2, height);
 
-    // ✅ Apply the scaling factor to both point clouds
-    const scaleFactor = Math.min(width / 1920, height / 1080);  // Adjust scaling reference as needed
+    // // ✅ Apply the scaling factor to both point clouds
+    const scaleFactor = Math.min(width / 1400, height / 1080);  // Adjust scaling reference as needed
     if (pointsTorus) pointsTorus.scale.set(scaleFactor, scaleFactor, scaleFactor);
     if (points2d) points2d.scale.set(scaleFactor, scaleFactor, scaleFactor);
 
@@ -296,8 +296,11 @@ function updateTorusColors(points) {
     });
 }
 
-cameraTorus.position.z = 8;
-camera2d.position.z = 0.8;
+// cameraTorus.position.z = 8;
+// camera2d.position.z = 0.8;
+
+cameraTorus.position.z = 10;
+camera2d.position.z = 1.0;
 
 // // Wait for plot data to load before setting plot sizes
 // setTimeout(function(){onWindowResize();}, 200);
