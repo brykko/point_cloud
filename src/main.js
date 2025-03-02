@@ -200,8 +200,6 @@ loadPointCloud(scene2d, './points_2d.json', (points, positions) => {
 
 const thumbnailContainer = document.createElement('div');
 thumbnailContainer.style.position = 'absolute';
-thumbnailContainer.style.bottom = `${window.innerHeight * 0.1}px`;  
-// thumbnailContainer.style.top = `${window.innerHeight * 0.75}px`;  // ✅ Start below the plots
 thumbnailContainer.style.left = '50%';
 thumbnailContainer.style.transform = 'translateX(-50%)';
 thumbnailContainer.style.display = 'grid';
@@ -296,6 +294,15 @@ function onWindowResize() {
     const aspectRatio = w/h;
 
     isHorzStacked = aspectRatio > ASPECT_RATIO_THRESH;
+    let thumbnailVPos;
+
+    if (isHorzStacked) {
+        thumbnailVPos = 0.85;
+    } else {
+        thumbnailVPos = 2/3;
+    }
+    thumbnailContainer.style.top = `${window.innerHeight * thumbnailVPos}px`;
+
     renderer.setSize(w, h);
 }
 window.addEventListener('resize', onWindowResize);
