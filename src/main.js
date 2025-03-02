@@ -6,8 +6,8 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 
 const NUM_CELLS = 199;
 const MAX_SELECTED_CELLS = 3;
-const BASE_POINT_SIZE_TORUS = 0.00075 * 2;
-const BASE_POINT_SIZE_2D = 0.000075 * 2;
+const BASE_POINT_SIZE_TORUS = 0.00075 * 2.5;
+const BASE_POINT_SIZE_2D = 0.000075 * 2.5;
 
 let currentSelectedCell = null;
 let defaultColors = null;
