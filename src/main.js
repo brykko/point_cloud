@@ -66,9 +66,11 @@ const scene2d = new THREE.Scene();
 const cameraTorus = new THREE.PerspectiveCamera(120, window.innerWidth / (2 * window.innerHeight), 0.1, 1000);
 const camera2d = new THREE.PerspectiveCamera(120, window.innerWidth / (2 * window.innerHeight), 0.1, 1000);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", alpha: false});
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.domElement.style.backgroundColor = 'black'; // crucial for filling entire page!
+
 document.body.appendChild(renderer.domElement);
 
 const composerTorus = new EffectComposer(renderer);
@@ -264,8 +266,8 @@ function updateTorusColors(points) {
     });
 }
 
-cameraTorus.position.z = 10;
-camera2d.position.z = 1.0;
+cameraTorus.position.z = 8;
+camera2d.position.z = 0.8;
 
 cameraTorus.aspect = 1;
 camera2d.aspect = 1;
@@ -294,6 +296,12 @@ function onWindowResize() {
 window.addEventListener('resize', onWindowResize);
 
 function setDrawRect(window, renderer, composer, isHorz, numDivs, tileIndex, centerN) {
+
+
+    if (!initialSizeSet && points2d && pointsTorus) {
+        onWindowResize();
+        initialSizeSet = true;
+    }
 
     const w = window.innerWidth;
     const h = window.innerHeight;
@@ -344,11 +352,9 @@ function setDrawRect(window, renderer, composer, isHorz, numDivs, tileIndex, cen
     // Call the two renderer rect-setting functions
     if (isHorz) {
         renderer.setScissor(offFullT, offFullN, tlenT, tlenN);
-        // renderer.setViewport(offFullT, offFullN, tlenT, tlenN);
         renderer.setViewport(offViewT, offViewN, tlenView, tlenView);
     } else {
         renderer.setScissor(offFullN, offFullT, tlenN, tlenT);
-        // renderer.setViewport(offFullN, offFullT, tlenN, tlenT);
         renderer.setViewport(offViewN, offViewT, tlenView, tlenView);
     }
 
@@ -363,32 +369,37 @@ function setDrawRect(window, renderer, composer, isHorz, numDivs, tileIndex, cen
 }
 
 function animate() {
-
-    // if (!initialSizeSet && pointsTorus && points2d) {
-    //     onWindowResize();
-    //     initialSizeSet = true;
-    // }
-
     requestAnimationFrame(animate);
     controlsTorus.update();
 
+    // First, disable scissor test and clear the entire canvas
+    renderer.setScissorTest(false);
+    renderer.clear(); // Clears the whole canvas using the clear color
+
+    // Now re-enable scissor test for the composer's viewports
     renderer.setScissorTest(true);
 
-    // Render torus
-    const tsz = setDrawRect(window, renderer, composerTorus, isHorzStacked, 2, 0, STACK_CENTER_POS);
 
+    let nTiles;
+    if (isHorzStacked) {
+        nTiles = 2;
+    } else {
+        nTiles = 3;
+    }
+
+
+    // Render torus scene
+    const tsz = setDrawRect(window, renderer, composerTorus, isHorzStacked, nTiles, 0, STACK_CENTER_POS);
     const scaleFactor = Math.sqrt(tsz);
-
     materialTorus.size = BASE_POINT_SIZE_TORUS * scaleFactor;
     material2d.size = BASE_POINT_SIZE_2D * scaleFactor;
-
     composerTorus.render();
-    // renderer.render(sceneTorus, cameraTorus);
 
-    setDrawRect(window, renderer, composer2d, isHorzStacked, 2, 1, STACK_CENTER_POS);
+    // Render 2d scene
+    setDrawRect(window, renderer, composer2d, isHorzStacked, nTiles, 1, STACK_CENTER_POS);
     composer2d.render();
-    // renderer.render(scene2d, camera2d);
 
+    // Optionally, disable scissor test for any further operations
     renderer.setScissorTest(false);
 }
 
