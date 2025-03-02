@@ -6,8 +6,8 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 
 const NUM_CELLS = 199;
 const MAX_SELECTED_CELLS = 3;
-const BASE_POINT_SIZE_TORUS = 0.00075 * 2.5;
-const BASE_POINT_SIZE_2D = 0.000075 * 2.5;
+const BASE_POINT_SIZE_TORUS = 0.00075 * 1.75;
+const BASE_POINT_SIZE_2D = 0.000075 * 1.75;
 
 let currentSelectedCell = null;
 let defaultColors = null;
@@ -200,7 +200,8 @@ loadPointCloud(scene2d, './points_2d.json', (points, positions) => {
 
 const thumbnailContainer = document.createElement('div');
 thumbnailContainer.style.position = 'absolute';
-thumbnailContainer.style.top = `${window.innerHeight * 0.75}px`;  // ✅ Start below the plots
+thumbnailContainer.style.bottom = `${window.innerHeight * 0.1}px`;  
+// thumbnailContainer.style.top = `${window.innerHeight * 0.75}px`;  // ✅ Start below the plots
 thumbnailContainer.style.left = '50%';
 thumbnailContainer.style.transform = 'translateX(-50%)';
 thumbnailContainer.style.display = 'grid';
@@ -266,13 +267,17 @@ function updateTorusColors(points) {
     });
 }
 
-cameraTorus.position.z = 8;
-camera2d.position.z = 0.8;
+// cameraTorus.position.z = 8;
+// cameraTorus.position.set(-2, -6, 5);
+cameraTorus.position.set(3, -6, 3);
+cameraTorus.lookAt(0, 0, 0);
+camera2d.position.z = 0.6;
 
 cameraTorus.aspect = 1;
 camera2d.aspect = 1;
 
 cameraTorus.updateProjectionMatrix();
+
 camera2d.updateProjectionMatrix();
 
 // // Wait for plot data to load before setting plot sizes
