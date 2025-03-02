@@ -1,5 +1,3 @@
-// This version plots the UMAP torus, adds a nice glow effect, and implements firing-rate map thumbnails with torus recoloring
-
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
@@ -8,8 +6,8 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 
 const NUM_CELLS = 199;
 const MAX_SELECTED_CELLS = 3;
-const BASE_POINT_SIZE_TORUS = 0.075;
-const BASE_POINT_SIZE_2D = 0.0075;
+const BASE_POINT_SIZE_TORUS = 0.00075 * 2;
+const BASE_POINT_SIZE_2D = 0.000075 * 2;
 
 let currentSelectedCell = null;
 let defaultColors = null;
@@ -82,35 +80,6 @@ const composer2d = new EffectComposer(renderer);
 composer2d.addPass(new RenderPass(scene2d, camera2d));
 composer2d.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.0, 0.3, 0.0));
 composer2d.setSize(window.innerWidth / 2, window.innerHeight);
-
-function onWindowResize() {
-    const width = window.innerWidth;
-    const height = window.innerHeight;
-
-    // ✅ Update camera aspect ratios
-    cameraTorus.aspect = (width / 2) / height;
-    camera2d.aspect = (width / 2) / height;
-    cameraTorus.updateProjectionMatrix();
-    camera2d.updateProjectionMatrix();
-
-    // ✅ Update renderer size
-    renderer.setSize(width, height);
-
-    // ✅ Update the composers to match new viewport sizes
-    composerTorus.setSize(width / 2, height);
-    composer2d.setSize(width / 2, height);
-
-    // // ✅ Apply the scaling factor to both point clouds
-    const scaleFactor = Math.min(width / 1400, height / 1080);  // Adjust scaling reference as needed
-    if (pointsTorus) pointsTorus.scale.set(scaleFactor, scaleFactor, scaleFactor);
-    if (points2d) points2d.scale.set(scaleFactor, scaleFactor, scaleFactor);
-
-    // ✅ Adjust point size dynamically based on viewport size
-    materialTorus.size = BASE_POINT_SIZE_TORUS * scaleFactor; 
-    material2d.size = BASE_POINT_SIZE_2D * scaleFactor;
-};
-
-window.addEventListener('resize', onWindowResize);
 
 const controlsTorus = new OrbitControls(cameraTorus, renderer.domElement);
 controlsTorus.enableDamping = true;
@@ -189,7 +158,6 @@ function loadPointCloud(scene, file, onLoadCallback, is2D, material) {
             }
             const geometry = new THREE.BufferGeometry();
             geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-            // geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
             const points = new THREE.Points(geometry, material);
             scene.add(points);
             onLoadCallback(points, positions);
@@ -216,7 +184,7 @@ let torusData = null; // Store the torus data globally
 
 loadPointCloud(sceneTorus, './points_umap.json', (points, positions) => { 
     pointsTorus = points;
-    torusData = positions; // ✅ Save torus data globally
+    torusData = positions; // Save torus data globally
     console.log(torusData);
     setPointColors(pointsTorus, torusData, 1); 
 }, false, materialTorus);
@@ -247,8 +215,8 @@ fetch('cell_list.txt')
         cellIDs.forEach(cellID => {
             const img = document.createElement('img');
             img.src = `rm/${cellID}.png`;
-            img.style.transform = 'rotate(-90deg)';  // ✅ Rotate counter-clockwise
-            img.classList.add('thumbnail');  // ✅ Apply the CSS class
+            img.style.transform = 'rotate(-90deg)';  // Rotate counter-clockwise
+            img.classList.add('thumbnail');  // Apply the CSS class
             img.addEventListener('click', () => toggleTorusColoring(parseInt(cellID)));
             thumbnailContainer.appendChild(img);
             thumbnailElements[cellID] = img;
@@ -296,37 +264,132 @@ function updateTorusColors(points) {
     });
 }
 
-// cameraTorus.position.z = 8;
-// camera2d.position.z = 0.8;
-
 cameraTorus.position.z = 10;
 camera2d.position.z = 1.0;
+
+cameraTorus.aspect = 1;
+camera2d.aspect = 1;
+
+cameraTorus.updateProjectionMatrix();
+camera2d.updateProjectionMatrix();
 
 // // Wait for plot data to load before setting plot sizes
 // setTimeout(function(){onWindowResize();}, 200);
 
 let initialSizeSet = false;
 
+const STACK_CENTER_POS = 0.5;
+let isHorzStacked = true;
+
+function onWindowResize() {
+
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const ASPECT_RATIO_THRESH = 1.0
+    const aspectRatio = w/h;
+
+    isHorzStacked = aspectRatio > ASPECT_RATIO_THRESH;
+    renderer.setSize(w, h);
+}
+window.addEventListener('resize', onWindowResize);
+
+function setDrawRect(window, renderer, composer, isHorz, numDivs, tileIndex, centerN) {
+
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+
+    let wszT;   // window size in tiling dimension (T)
+    let wszN;   // window size in nontiling dimension (N)
+
+    if (isHorz) {
+        wszT = w;
+        wszN = h;
+    } else {
+        wszT = h;
+        wszN = w;
+    }
+
+    // The stack of tiles can be offset from the middle of the window's N dim, 
+    // according to input variable "centerN". If centerN is smaller or greater 
+    // than 0.5, the effective available fraction of wszN will be less than 1. 
+    let fracNAvailable;
+    if (centerN > 0.5) {
+        // Positive offset (upwards or rightwards)
+        fracNAvailable = (1-centerN) * 2;
+    } else if (centerN < 0.5) {
+        // Negative offset (downwards or leftwards)
+        fracNAvailable = centerN * 2;
+    } else if (centerN == 0.5) {
+        // Center-aligned: full size available
+        fracNAvailable = 1;
+    }
+
+    const wszNAvailable = wszN * fracNAvailable;
+
+    // We want to work out what the *maximum* side-length for a square tile
+    // would be, given the window's dimensions and the specified tile stacking
+    const tlenView = Math.min(wszT/numDivs, wszNAvailable); // actual viewport size
+    const tlenT = wszT/numDivs;                             // tile scissor size
+    const tlenN = wszN;
+    const tLenViewOffsetT = (tlenT - tlenView)/2;           // single-tile view offset
+    const tLenViewOffsetN = (tlenN - tlenView) * centerN;
+
+
+    // const offFullT = tileIndex * tlenT;  // 1 is the stacking dimension
+    const offFullT = isHorz ? (tileIndex*tlenT) : ((numDivs-tileIndex-1)*tlenT);
+    const offFullN = 0;                  // scissor draws whole slice of window
+    const offViewT = offFullT + tLenViewOffsetT;
+    const offViewN = offFullN + tLenViewOffsetN;
+
+    // Call the two renderer rect-setting functions
+    if (isHorz) {
+        renderer.setScissor(offFullT, offFullN, tlenT, tlenN);
+        // renderer.setViewport(offFullT, offFullN, tlenT, tlenN);
+        renderer.setViewport(offViewT, offViewN, tlenView, tlenView);
+    } else {
+        renderer.setScissor(offFullN, offFullT, tlenN, tlenT);
+        // renderer.setViewport(offFullN, offFullT, tlenN, tlenT);
+        renderer.setViewport(offViewN, offViewT, tlenView, tlenView);
+    }
+
+    if (composer) {
+        composer.setSize(tlenView, tlenView);
+    }
+
+    console.log(`offFullT=${offFullT}, offFullN=${offFullN}, offViewT=${offViewT}, offViewN=${offViewN}, tlenT=${tlenT}, tlenN=${tlenN}, tlenView=${tlenView}`)
+
+    return tlenView;
+
+}
+
 function animate() {
 
-    if (!initialSizeSet && pointsTorus && points2d) {
-        onWindowResize();
-        initialSizeSet = true;
-    }
+    // if (!initialSizeSet && pointsTorus && points2d) {
+    //     onWindowResize();
+    //     initialSizeSet = true;
+    // }
 
     requestAnimationFrame(animate);
     controlsTorus.update();
 
     renderer.setScissorTest(true);
 
-    renderer.setScissor(0, 0, window.innerWidth / 2, window.innerHeight);
-    renderer.setViewport(0, 0, window.innerWidth / 2, window.innerHeight);
-    composerTorus.render();
+    // Render torus
+    const tsz = setDrawRect(window, renderer, composerTorus, isHorzStacked, 2, 0, STACK_CENTER_POS);
 
-    renderer.setScissor(window.innerWidth / 2, 0, window.innerWidth / 2, window.innerHeight);
-    renderer.setViewport(window.innerWidth / 2, 0, window.innerWidth / 2, window.innerHeight);
+    const scaleFactor = Math.sqrt(tsz);
+
+    materialTorus.size = BASE_POINT_SIZE_TORUS * scaleFactor;
+    material2d.size = BASE_POINT_SIZE_2D * scaleFactor;
+
+    composerTorus.render();
+    // renderer.render(sceneTorus, cameraTorus);
+
+    setDrawRect(window, renderer, composer2d, isHorzStacked, 2, 1, STACK_CENTER_POS);
     composer2d.render();
+    // renderer.render(scene2d, camera2d);
 
     renderer.setScissorTest(false);
 }
+
 animate();
