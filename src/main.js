@@ -209,7 +209,7 @@ thumbnailContainer.style.maxWidth = '80vw';
 thumbnailContainer.style.justifyContent = 'center';
 document.body.appendChild(thumbnailContainer);
 
-fetch('cell_list.txt')
+fetch('cell_list_3.txt')
     .then(response => response.text())
     .then(text => {
         const cellIDs = text.split('\n').map(line => line.trim()).filter(line => line !== '');
