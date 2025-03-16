@@ -166,38 +166,56 @@ function loadPointCloud(scene, file, onLoadCallback, is2D, material) {
         });
 }
 
-function setPointColors(points, data, dim) {
-    const pointCount = points.geometry.attributes.position.count;
-    const colors = new Float32Array(pointCount * 3);
-    for (let i = 0; i < pointCount; i++) {
-        const [r, g, b] = viridisColormap(data[i*3 + dim], -4, 4);
-        colors.set([r, g, b], i * 3);
-    }
-    points.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+// function setDefaultPointColors(points, data, dim) {
+//     const pointCount = points.geometry.attributes.position.count;
+//     const colors = new Float32Array(pointCount * 3);
+//     for (let i = 0; i < pointCount; i++) {
+//         const [r, g, b] = viridisColormap(data[i*3 + dim], -4, 4);
+//         colors.set([r, g, b], i * 3);
+//     }
+//     points.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
-    // Set default colors if not already set
-    if (!defaultColors) {
+//     // Set default colors if not already set
+//     if (!defaultColors) {
+//         defaultColors = colors.slice();
+//     }
+// }
+
+function setDefaultPointColors(points, dim) {
+    fetch('./torusphase_interp.bin').then(r => r.arrayBuffer()).then(buffer => {
+        const phases = new Float32Array(buffer)
+        const pointCount = points.geometry.attributes.position.count;
+        const colors = new Float32Array(pointCount * 3);
+        for (let i = 0; i < pointCount; i++) {
+            // const [r, g, b] = viridisColormap(data[i*3 + dim], -4, 4);
+            const [r, g, b] = viridisColormap(phases[i + dim*pointCount], -3.14, 3.14);
+            colors.set([r, g, b], i * 3);
+        }
+        points.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
         defaultColors = colors.slice();
-    }
-
+    })
 }
 
 let torusData = null; // Store the torus data globally
 
-loadPointCloud(sceneTorus, './points_umap.json', (points, positions) => { 
-    pointsTorus = points;
-    torusData = positions; // Save torus data globally
+loadPointCloud(sceneTorus, './points_umap.json', (pointsObj, positionsArr) => { 
+    pointsTorus = pointsObj;
+    torusData = positionsArr; // Save torus data globally
     console.log(torusData);
-    setPointColors(pointsTorus, torusData, 1); 
+    setDefaultPointColors(pointsTorus, 0); 
 }, false, materialTorus);
 
-loadPointCloud(scene2d, './points_2d.json', (points, positions) => { 
-    points2d = points;
+loadPointCloud(scene2d, './points_2d.json', (pointsObj, positionsArr) => { 
+    points2d = pointsObj;
     setTimeout(function(){
-        setPointColors(points2d, torusData, 1);
+        setDefaultPointColors(points2d, 0);
     }, 100) // Delay to ensure torusData is loaded
 }, true, material2d);
 
+///////////////////////////////////////////////////////////////////////////////////////////
+// Thumbnail setup
+
+// Create the thumbnail container
 const thumbnailContainer = document.createElement('div');
 thumbnailContainer.style.position = 'absolute';
 thumbnailContainer.style.left = '50%';
@@ -209,6 +227,7 @@ thumbnailContainer.style.maxWidth = '80vw';
 thumbnailContainer.style.justifyContent = 'center';
 document.body.appendChild(thumbnailContainer);
 
+// Fill
 fetch('cell_list_3.txt')
     .then(response => response.text())
     .then(text => {
@@ -218,33 +237,47 @@ fetch('cell_list_3.txt')
             img.src = `rm/${cellID}.png`;
             img.style.transform = 'rotate(-90deg)';  // Rotate counter-clockwise
             img.classList.add('thumbnail');  // Apply the CSS class
-            img.addEventListener('click', () => toggleTorusColoring(parseInt(cellID)));
+            img.addEventListener('click', () => toggleColoring(parseInt(cellID)));
             thumbnailContainer.appendChild(img);
             thumbnailElements[cellID] = img;
         });
     });
 
-function toggleTorusColoring(cellID) {
+///////////////////////////////////////////////////////////////////////////////////////////
+// Callbacks
+
+function toggleColoring(cellID) {
+    // Clicked the currently selected cell: deselect it
     if (selectedCells.includes(cellID)) {
         selectedCells = selectedCells.filter(id => id !== cellID);
         delete colormapAssignments[cellID];
+    // Clicked a non-selected cell: select it
     } else {
         if (selectedCells.length >= MAX_SELECTED_CELLS) return;
         selectedCells.push(cellID);
         colormapAssignments[cellID] = colormaps[selectedCells.length - 1];
     }
     updateThumbnailBorders();
-    updateTorusColors(pointsTorus);
-    updateTorusColors(points2d);
+    updatePointsColors(pointsTorus);
+    updatePointsColors(points2d);
 }
 
-function updateTorusColors(points) {
+function updatePointsColors(points) {
+    // Sets the color for a given Points object, depending on the current
+    // selection of cells. The selected cells' firing rates are mapped to 
+    // their respective colormaps and added to the Points color attribute.
+
+    // Special case: no points selected. Here we revert to the default colors
     if (selectedCells.length === 0) {
         points.geometry.attributes.color.array.set(defaultColors);
         points.geometry.attributes.color.needsUpdate = true;
         return;
     }
     
+    // All other cases: additively combine the RGB-mapped activity of the 
+    // selected cells.
+    //
+    // Create a new array for the RGB color of the points
     const pointCount = points.geometry.attributes.position.count;
     const colors = new Float32Array(pointCount * 3).fill(0.1);
     selectedCells.forEach(cellID => {
@@ -265,21 +298,14 @@ function updateTorusColors(points) {
     });
 }
 
-// cameraTorus.position.z = 8;
-// cameraTorus.position.set(-2, -6, 5);
+// Set camera position / aspect
 cameraTorus.position.set(3, -6, 3);
 cameraTorus.lookAt(0, 0, 0);
 camera2d.position.z = 0.6;
-
 cameraTorus.aspect = 1;
 camera2d.aspect = 1;
-
 cameraTorus.updateProjectionMatrix();
-
 camera2d.updateProjectionMatrix();
-
-// // Wait for plot data to load before setting plot sizes
-// setTimeout(function(){onWindowResize();}, 200);
 
 let initialSizeSet = false;
 
@@ -308,7 +334,6 @@ function onWindowResize() {
 window.addEventListener('resize', onWindowResize);
 
 function setDrawRect(window, renderer, composer, isHorz, numDivs, tileIndex, centerN) {
-
 
     if (!initialSizeSet && points2d && pointsTorus) {
         onWindowResize();
@@ -374,7 +399,7 @@ function setDrawRect(window, renderer, composer, isHorz, numDivs, tileIndex, cen
         composer.setSize(tlenView, tlenView);
     }
 
-    console.log(`offFullT=${offFullT}, offFullN=${offFullN}, offViewT=${offViewT}, offViewN=${offViewN}, tlenT=${tlenT}, tlenN=${tlenN}, tlenView=${tlenView}`)
+    // console.log(`offFullT=${offFullT}, offFullN=${offFullN}, offViewT=${offViewT}, offViewN=${offViewN}, tlenT=${tlenT}, tlenN=${tlenN}, tlenView=${tlenView}`)
 
     return tlenView;
 
