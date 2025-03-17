@@ -15,10 +15,11 @@ const BASE_POINT_SIZE_2D = 0.000075 * 1.75;
 let currentColorMode = 'default';
 let defaultColors = null;
 let selectedCells = [];
-let colormapAssignments = {};
+// Remove dynamic colormap assignments – we now use a fixed mapping.
+let fixedColormapMapping = {};
 let thumbnailElements = {};
 
-// Predefined colormaps for grid-cell selection
+// Fixed colormaps for grid cells (three available)
 const colormaps = [hotColormap, coolColormap, magentaColormap];
 
 // Global cache for phase data (3-column matrix)
@@ -97,7 +98,10 @@ const ColorManager = {
     }
   },
   updateColors: async function(points, positionsData) {
-    // Dispatch to the appropriate coloration update based on the current mode.
+    // If grid-cell mode but no cells are selected, revert to default.
+    if (currentColorMode === 'gridCell' && selectedCells.length === 0) {
+      currentColorMode = 'default';
+    }
     switch (currentColorMode) {
       case 'default':
         this.applyDefaultColors(points, positionsData, 1);
@@ -120,15 +124,15 @@ const ColorManager = {
       colors.set([r, g, b], i * 3);
     }
     points.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    // Cache default colors globally
     defaultColors = colors.slice();
   },
   applyGridCellColors: async function(points) {
     const pointCount = points.geometry.attributes.position.count;
     const colors = new Float32Array(pointCount * 3).fill(0.1);
+    // Iterate over the selected grid cells and combine their fixed colormaps.
     for (const cellID of selectedCells) {
       const firingRates = await loadBinary(`./fr/${cellID}.bin`);
-      const cmap = colormapAssignments[cellID];
+      const cmap = fixedColormapMapping[cellID];
       for (let i = 0; i < pointCount; i++) {
         const [r, g, b] = cmap(firingRates[i]);
         colors[i * 3] += r;
@@ -143,7 +147,6 @@ const ColorManager = {
     await this.initPhaseData();
     const pointCount = points.geometry.attributes.position.count;
     const colors = new Float32Array(pointCount * 3);
-    // Determine which column of phase data to use
     let phaseIndex = (phaseMode === 'phase1') ? 0 :
                      (phaseMode === 'phase2') ? 1 : 2;
     for (let i = 0; i < pointCount; i++) {
@@ -241,7 +244,6 @@ async function loadPointCloud(scene, file, is2D, material) {
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  // Initialize a dummy color attribute; will be updated later.
   const colors = new Float32Array(pointCount * 3);
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   const points = new THREE.Points(geometry, material);
@@ -262,13 +264,13 @@ loadPointCloud(sceneTorus, './points_umap.json', false, materialTorus)
 loadPointCloud(scene2d, './points_2d.json', true, material2d)
   .then(({ points }) => {
     points2d = points;
-    // Wait a bit to ensure torusData is available.
     setTimeout(() => {
       ColorManager.applyDefaultColors(points2d, torusData, 1);
     }, 100);
   });
 
 // ─── UI: THUMBNAILS & PHASE MODE BUTTONS ─────────────────────────────────────
+// Use a unique ID for the thumbnail container.
 function setupThumbnails() {
   const thumbnailContainer = document.createElement('div');
   thumbnailContainer.id = 'thumbnailContainer';
@@ -286,12 +288,16 @@ function setupThumbnails() {
     .then(response => response.text())
     .then(text => {
       const cellIDs = text.split('\n').map(line => line.trim()).filter(line => line !== '');
-      cellIDs.forEach(cellID => {
+      cellIDs.forEach((cellID, index) => {
         const img = document.createElement('img');
         img.src = `rm/${cellID}.png`;
         img.style.transform = 'rotate(-90deg)';
         img.classList.add('thumbnail');
-        img.addEventListener('click', () => toggleGridCellColor(parseInt(cellID)));
+        // Assign a fixed colormap based on the order (only three expected)
+        if (index < colormaps.length) {
+          fixedColormapMapping[cellID] = colormaps[index];
+        }
+        img.addEventListener('click', () => toggleGridCellColor(cellID));
         thumbnailContainer.appendChild(img);
         thumbnailElements[cellID] = img;
       });
@@ -330,8 +336,9 @@ function setupPhaseModeButtons() {
 function updateThumbnailBorders() {
   Object.keys(thumbnailElements).forEach(cellID => {
     const img = thumbnailElements[cellID];
-    if (selectedCells.includes(parseInt(cellID))) {
-      const cmap = colormapAssignments[cellID];
+    if (selectedCells.includes(cellID)) {
+      // Use the fixed mapping for border color.
+      const cmap = fixedColormapMapping[cellID];
       img.style.border = `2px solid rgb(${cmap(0.75).map(v => v * 255).join(',')})`;
     } else {
       img.style.border = '2px solid transparent';
@@ -339,16 +346,16 @@ function updateThumbnailBorders() {
   });
 }
 
+// Simplified toggle: simply add or remove the cell from the selection.
+// If no cells remain selected, revert to default mode.
 function toggleGridCellColor(cellID) {
   if (selectedCells.includes(cellID)) {
     selectedCells = selectedCells.filter(id => id !== cellID);
-    delete colormapAssignments[cellID];
   } else {
-    if (selectedCells.length >= MAX_SELECTED_CELLS) return;
+    // Since only three grid cells exist, we don't need to check for MAX_SELECTED_CELLS.
     selectedCells.push(cellID);
-    colormapAssignments[cellID] = colormaps[selectedCells.length - 1];
   }
-  currentColorMode = 'gridCell';
+  currentColorMode = selectedCells.length === 0 ? 'default' : 'gridCell';
   updateThumbnailBorders();
   updateAllPointsColors();
 }
@@ -380,12 +387,10 @@ function onWindowResize() {
   const ASPECT_RATIO_THRESH = 1.0;
   const aspectRatio = w / h;
   isHorzStacked = aspectRatio > ASPECT_RATIO_THRESH;
-  // Adjust the thumbnail container’s vertical position.
   const thumbnailContainer = document.getElementById('thumbnailContainer');
   if (thumbnailContainer) {
     thumbnailContainer.style.top = `${window.innerHeight * (isHorzStacked ? 0.85 : 2/3)}px`;
   }
-//   document.querySelector('div').style.top = `${window.innerHeight * (isHorzStacked ? 0.85 : 2/3)}px`;
   renderer.setSize(w, h);
 }
 window.addEventListener('resize', onWindowResize);
@@ -448,6 +453,7 @@ function animate() {
   const nTiles = isHorzStacked ? 2 : 3;
   const tsz = setDrawRect(window, renderer, composerTorus, isHorzStacked, nTiles, 0, STACK_CENTER_POS);
   const scaleFactor = Math.sqrt(tsz);
+
   materialTorus.size = BASE_POINT_SIZE_TORUS * scaleFactor;
   material2d.size = BASE_POINT_SIZE_2D * scaleFactor;
   composerTorus.render();
