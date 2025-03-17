@@ -32,6 +32,35 @@ function viridisColormap(value, limLo, limHi) {
     return [(1 - mix) * c1[0] + mix * c2[0], (1 - mix) * c1[1] + mix * c2[1], (1 - mix) * c1[2] + mix * c2[2]].map(x => x / 255);
 }
 
+function hsvColormapCircular(value, minVal = -Math.PI, maxVal = Math.PI) {
+    // Normalize value to [0, 1] range
+    let t = (value - minVal) / (maxVal - minVal);
+    t = Math.max(0, Math.min(1, t));  // Ensure within bounds
+
+    // Convert to hue angle (0-360 degrees)
+    let hue = t * 360;
+
+    // Convert HSV (hue, saturation, value) → RGB
+    return hsvToRgb(hue, 1.0, 1.0);
+}
+
+// Helper function: Convert HSV to RGB (all values in range [0, 1])
+function hsvToRgb(h, s, v) {
+    let c = v * s;
+    let x = c * (1 - Math.abs((h / 60) % 2 - 1));
+    let m = v - c;
+    let r = 0, g = 0, b = 0;
+
+    if (h < 60)      [r, g, b] = [c, x, 0];
+    else if (h < 120) [r, g, b] = [x, c, 0];
+    else if (h < 180) [r, g, b] = [0, c, x];
+    else if (h < 240) [r, g, b] = [0, x, c];
+    else if (h < 300) [r, g, b] = [x, 0, c];
+    else              [r, g, b] = [c, 0, x];
+
+    return [r + m, g + m, b + m];  // Adjust to fit [0,1] range
+}
+
 function hotColormap(value) {
     let t = Math.max(0, Math.min(1, value));
     return [Math.min(1, t * 2), Math.max(0, Math.min(1, t * 3 - 1)), 0];
@@ -166,32 +195,29 @@ function loadPointCloud(scene, file, onLoadCallback, is2D, material) {
         });
 }
 
-// function setDefaultPointColors(points, data, dim) {
-//     const pointCount = points.geometry.attributes.position.count;
-//     const colors = new Float32Array(pointCount * 3);
-//     for (let i = 0; i < pointCount; i++) {
-//         const [r, g, b] = viridisColormap(data[i*3 + dim], -4, 4);
-//         colors.set([r, g, b], i * 3);
-//     }
-//     points.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-
-//     // Set default colors if not already set
-//     if (!defaultColors) {
-//         defaultColors = colors.slice();
-//     }
-// }
-
-function setDefaultPointColors(points, dim) {
+function setDefaultPointColors(points, data, dim) {
+    // Here we load the "torus phase" data (the new data that we don't yet make use of).
+    // This is a three-column matrix (the torus has three phase axes).
+    // There is probably a more sensible place to load the data.
     fetch('./torusphase_interp.bin').then(r => r.arrayBuffer()).then(buffer => {
-        const phases = new Float32Array(buffer)
+        const phases = new Float32Array(buffer) // array of torus-phase data (unused)
         const pointCount = points.geometry.attributes.position.count;
         const colors = new Float32Array(pointCount * 3);
         for (let i = 0; i < pointCount; i++) {
-            // const [r, g, b] = viridisColormap(data[i*3 + dim], -4, 4);
-            const [r, g, b] = viridisColormap(phases[i + dim*pointCount], -3.14, 3.14);
+
+            // We use the input data array as the default coloration
+            const [r, g, b] = viridisColormap(data[i*3 + dim], -4, 4);
+
+            // To instead use the torus-phase data as default, uncomment the line below.
+            // (But really, we want to make the torus-phase colors switchable, similar
+            // to the single-grid-cell coloration).
+            // const [r, g, b] = hsvColormapCircular(phases[i + dim*pointCount]);
+
             colors.set([r, g, b], i * 3);
         }
         points.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+        // Store the default colors in a global variable
         defaultColors = colors.slice();
     })
 }
@@ -202,13 +228,13 @@ loadPointCloud(sceneTorus, './points_umap.json', (pointsObj, positionsArr) => {
     pointsTorus = pointsObj;
     torusData = positionsArr; // Save torus data globally
     console.log(torusData);
-    setDefaultPointColors(pointsTorus, 0); 
+    setDefaultPointColors(pointsTorus, torusData, 1);
 }, false, materialTorus);
 
 loadPointCloud(scene2d, './points_2d.json', (pointsObj, positionsArr) => { 
     points2d = pointsObj;
     setTimeout(function(){
-        setDefaultPointColors(points2d, 0);
+        setDefaultPointColors(points2d, torusData, 1);
     }, 100) // Delay to ensure torusData is loaded
 }, true, material2d);
 
