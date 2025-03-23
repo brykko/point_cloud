@@ -1,4 +1,5 @@
 // utils.js
+import * as THREE from 'three';
 
 // ----- Data Loading Utilities -----
 export async function loadJSON(url) {
@@ -65,6 +66,41 @@ export function magentaColormap(value) {
   return [Math.max(0, Math.min(1, t * 3 - 1)), 0, Math.max(0, Math.min(1, t * 2 - 1))];
 }
 
+
+// ----- Textures -----
+
+// The soft glow texture (shared by both materials) is already created in your utils
+// (or you can keep your original code here if you prefer)
+const canvasTexture = document.createElement('canvas');
+canvasTexture.width = 128;
+canvasTexture.height = 128;
+const ctx = canvasTexture.getContext('2d');
+const gradient = ctx.createRadialGradient(64, 64, 10, 64, 64, 64);
+gradient.addColorStop(0, 'rgba(255,255,255,0.3)');  // Bright center
+gradient.addColorStop(1, 'rgba(255,255,255,0)');    // Fading edge
+ctx.fillStyle = gradient;
+ctx.fillRect(0, 0, 128, 128);
+export const softGlowTexture = new THREE.CanvasTexture(canvasTexture);
+softGlowTexture.encoding = THREE.SRGBColorSpace;
+
+// Create a circular texture for the sprite (or load one)
+const circleCanvas = document.createElement('canvas');
+circleCanvas.width = 128;
+circleCanvas.height = 128;
+const ctxCircle = circleCanvas.getContext('2d');
+ctxCircle.beginPath();
+ctxCircle.arc(64, 64, 60, 0, Math.PI * 2);
+ctxCircle.fillStyle = '#ffffff';
+ctxCircle.fill();
+const circleTexture = new THREE.CanvasTexture(circleCanvas);
+
+// Create a sprite material using the circle texture
+export const spriteMaterial = new THREE.SpriteMaterial({
+  map: circleTexture,
+  color: 0xffffff,
+  transparent: true});
+
+
 // ----- Layout Utility -----
 export function setDrawRect(windowObj, renderer, composer, isHorz, numDivs, tileIndex, centerN) {
   const w = windowObj.innerWidth;
@@ -94,3 +130,7 @@ export function setDrawRect(windowObj, renderer, composer, isHorz, numDivs, tile
   }
   return tlenView;
 }
+
+
+// ----- Other misc helpers ----- 
+

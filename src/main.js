@@ -8,204 +8,45 @@ import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 
-// My utils module
-import { loadJSON, loadBinary, viridisColormap, hsvColormapCircular, hsvToRgb, hotColormap, coolColormap, magentaColormap, setDrawRect } from './utils/utils.js';
+// My utils module – contains data loading, color maps, and setDrawRect
+import {loadJSON, loadBinary, viridisColormap, hsvColormapCircular, hotColormap, coolColormap, magentaColormap, setDrawRect, softGlowTexture, spriteMaterial } from './utils/utils.js';
 
 
 // ─── URL PARAMETERS: SHOW UI CONTROLS ─────────────────────────────────────────
 const urlParams = new URLSearchParams(window.location.search);
-const showGridCells = urlParams.get('showGridCells') === 'true';
-const showPhases = urlParams.get('showPhases') === 'true';
-const showTraj = urlParams.get('showTraj') === 'true';
+const showGridBtns = urlParams.get('showGridBtns') === 'true';
+const showPhaseBtns = urlParams.get('showPhaseBtns') === 'true';
+const showTrajBtns = urlParams.get('showTrajBtns') === 'true';
+let trajVisible = urlParams.get('trajVisible') === 'true'; // initial traj visibility state
 
+console.log(trajVisible);
 
-// ─── CONSTANTS & GLOBAL STATE ────────────────────────────────────────────────
-const BASE_POINT_SIZE_TORUS = 0.00075 * 1.75;
-const BASE_POINT_SIZE_2D = 0.000075 * 1.75;
-
-// Global state for coloration modes and grid-cell selections
-// Modes: 'default', 'gridCell', 'phase1', 'phase2', 'phase3'
+// ─── GLOBAL VARIABLES USED BY UI (COLOR MODES, SELECTIONS, ETC.) ─────────────
 let currentColorMode = 'default';
 let defaultColors = null;
 let selectedCells = [];
-// Remove dynamic colormap assignments – we now use a fixed mapping.
+let isHorzStacked = null;
+
+// Fixed colormap mapping for grid cells.
 let fixedColormapMapping = {};
 let thumbnailElements = {};
 
-// Fixed colormaps for grid cells (three available)
+let trajAnimationActive = false;
+let trajAnimationProgress = 0.0;
+const TRAJECTORY_START = 5000;
+const TRAJECTORY_COUNT = 20;
+
+const DEFAULT_COLOR_DIM = 0;
+
+// Fixed colormaps (three available)
 const colormaps = [hotColormap, coolColormap, magentaColormap];
 
-// Global cache for phase data (3-column matrix)
+// Global cache for phase data (for ColorManager)
 let phaseData = null;
 
-// Trajectory globals
-let trajLineTorus, trajLine2d;      // fat-line objects for trajectory visualization
-let trajCurveTorus, trajCurve2d;    // CatmullRomCurve3 curves for each scene (for smooth interpolation)
-let discTorus, disc2d;              // disc objects that will animate along the trajectory
-let trajAnimationActive = false;    // flag for trajectory animation
-let trajAnimationProgress = 0;        // progress (0-1) along the trajectory curve
+// Helpers
 
-
-// ─── COLOR MANAGER MODULE ─────────────────────────────────────────────────────
-const ColorManager = {
-  async initPhaseData() {
-    if (!phaseData) {
-      phaseData = await loadBinary('./torusphase_interp.bin');
-    }
-  },
-  updateColors: async function(points, positionsData) {
-    // If grid-cell mode but no cells are selected, revert to default.
-    if (currentColorMode === 'gridCell' && selectedCells.length === 0) {
-      currentColorMode = 'default';
-    }
-    switch (currentColorMode) {
-      case 'default':
-        this.applyDefaultColors(points, positionsData, 1);
-        break;
-      case 'gridCell':
-        await this.applyGridCellColors(points);
-        break;
-      default:
-        if (currentColorMode.startsWith('phase')) {
-          await this.applyPhaseColors(points, currentColorMode);
-        }
-        break;
-    }
-  },
-  applyDefaultColors(points, positionsData, dim) {
-    const pointCount = points.geometry.attributes.position.count;
-    const colors = new Float32Array(pointCount * 3);
-    for (let i = 0; i < pointCount; i++) {
-      const [r, g, b] = viridisColormap(positionsData[i * 3 + dim], -4, 4);
-      colors.set([r, g, b], i * 3);
-    }
-    points.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    defaultColors = colors.slice();
-  },
-  applyGridCellColors: async function(points) {
-    const pointCount = points.geometry.attributes.position.count;
-    const colors = new Float32Array(pointCount * 3).fill(0.1);
-    // Iterate over the selected grid cells and combine their fixed colormaps.
-    for (const cellID of selectedCells) {
-      const firingRates = await loadBinary(`./fr/${cellID}.bin`);
-      const cmap = fixedColormapMapping[cellID];
-      for (let i = 0; i < pointCount; i++) {
-        const [r, g, b] = cmap(firingRates[i]);
-        colors[i * 3] += r;
-        colors[i * 3 + 1] += g;
-        colors[i * 3 + 2] += b;
-      }
-    }
-    points.geometry.attributes.color.array.set(colors);
-    points.geometry.attributes.color.needsUpdate = true;
-  },
-  applyPhaseColors: async function(points, phaseMode) {
-    await this.initPhaseData();
-    const pointCount = points.geometry.attributes.position.count;
-    const colors = new Float32Array(pointCount * 3);
-    let phaseIndex = (phaseMode === 'phase1') ? 0 :
-                     (phaseMode === 'phase2') ? 1 : 2;
-    for (let i = 0; i < pointCount; i++) {
-      const phaseValue = phaseData[i + phaseIndex * pointCount];
-      const [r, g, b] = hsvColormapCircular(phaseValue);
-      colors.set([r, g, b], i * 3);
-    }
-    points.geometry.attributes.color.array.set(colors);
-    points.geometry.attributes.color.needsUpdate = true;
-  }
-};
-
-
-// ─── SCENE, CAMERA, RENDERER & CONTROLS SETUP ───────────────────────────────
-const sceneTorus = new THREE.Scene();
-const scene2d = new THREE.Scene();
-const cameraTorus = new THREE.PerspectiveCamera(120, window.innerWidth / (2 * window.innerHeight), 0.1, 1000);
-const camera2d = new THREE.PerspectiveCamera(120, window.innerWidth / (2 * window.innerHeight), 0.1, 1000);
-
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", alpha: false });
-renderer.setPixelRatio(window.devicePixelRatio);
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.domElement.style.backgroundColor = 'black';
-document.body.appendChild(renderer.domElement);
-
-// ─── EFFECT COMPOSER & BLOOM SETUP ───────────────────────────────────────────
-function createBloomPass(renderer, scene, camera, strength) {
-  const composer = new EffectComposer(renderer);
-  composer.addPass(new RenderPass(scene, camera));
-  const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), strength, 0.3, 0.0);
-  composer.addPass(bloomPass);
-  composer.setSize(window.innerWidth / 2, window.innerHeight);
-  return { composer, bloomPass };
-}
-
-const { composer: composerTorus, bloomPass: bloomPassTorus } = createBloomPass(renderer, sceneTorus, cameraTorus, 0.5);
-const { composer: composer2d, bloomPass: bloomPass2d } = createBloomPass(renderer, scene2d, camera2d, 1.0);
-
-// The "bloom" effect needs boosting when we display the single-grid-cell data.
-function updateBloomStrength() {
-  if (currentColorMode === 'gridCell') {
-    bloomPassTorus.strength = 1.5; // stronger glow for grid-cell mode
-    bloomPass2d.strength = 3;
-  } else {
-    bloomPassTorus.strength = 0.5; // default glow
-    bloomPass2d.strength = 1.0;
-  }
-}
-
-// Call updateBloomStrength() each time the color mode changes or in your animation loop:
-updateAllPointsColors = async function() {
-  if (pointsTorus) await ColorManager.updateColors(pointsTorus, torusData);
-  if (points2d) await ColorManager.updateColors(points2d, torusData);
-  updateBloomStrength();
-};
-
-const controlsTorus = new OrbitControls(cameraTorus, renderer.domElement);
-controlsTorus.enableDamping = true;
-controlsTorus.autoRotate = true;
-controlsTorus.autoRotateSpeed = 1;
-controlsTorus.enablePan = false;
-controlsTorus.enableZoom = true;
-
-const controls2d = new OrbitControls(camera2d, renderer.domElement);
-controls2d.enableDamping = true;
-controls2d.enableRotate = false;
-controls2d.enablePan = false;
-controls2d.enableZoom = false;
-
-
-// ─── SOFT GLOW TEXTURE SETUP ──────────────────────────────────────────────────
-const canvasTexture = document.createElement('canvas');
-canvasTexture.width = 128;
-canvasTexture.height = 128;
-const ctx = canvasTexture.getContext('2d');
-const gradient = ctx.createRadialGradient(64, 64, 10, 64, 64, 64);
-gradient.addColorStop(0, 'rgba(255,255,255,0.3)');  // Bright center
-gradient.addColorStop(1, 'rgba(255,255,255,0)');    // Fading edge
-ctx.fillStyle = gradient;
-ctx.fillRect(0, 0, 128, 128);
-const texture = new THREE.CanvasTexture(canvasTexture);
-texture.encoding = THREE.SRGBColorSpace;
-
-const materialTorus = new THREE.PointsMaterial({ 
-  vertexColors: true,
-  size: BASE_POINT_SIZE_TORUS,
-  map: texture,           // Apply soft glow texture
-  transparent: true,      // Enable transparency
-  blending: THREE.AdditiveBlending,
-  depthWrite: false
-});
-
-const material2d = new THREE.PointsMaterial({
-  size: BASE_POINT_SIZE_2D,
-  vertexColors: true,
-  map: texture,           // Use the same texture
-  transparent: true
-});
-
-
-// ─── TRAJECTORY PLOTTING ────────────────────────────────────────────────────
-
-// Helper: Extract a segment of points from a flat Float32Array of positions.
+// Extract a segment of points from a flat Float32Array of positions.
 // `positions` is a Float32Array of length (N * 3)
 // `startIdx` is the index (in point-space, not array index) of the first point,
 // and `count` is the number of points to extract.
@@ -265,31 +106,7 @@ function createFatTrajectoryLine(filteredPoints) {
   return { line: fatLine, curve: curve };
 }
 
-// Create a circular texture for the sprite (or load one)
-const circleCanvas = document.createElement('canvas');
-circleCanvas.width = 128;
-circleCanvas.height = 128;
-const ctxCircle = circleCanvas.getContext('2d');
-ctxCircle.beginPath();
-ctxCircle.arc(64, 64, 60, 0, Math.PI * 2);
-ctxCircle.fillStyle = '#ffffff';
-ctxCircle.fill();
-const circleTexture = new THREE.CanvasTexture(circleCanvas);
-
-// Create a sprite material using the circle texture
-const spriteMaterial = new THREE.SpriteMaterial({
-  map: circleTexture,
-  color: 0xffffff,
-  transparent: true
-});
-
-// Parameters for trajectory extraction.
-const TRAJECTORY_START = 50;
-const TRAJECTORY_COUNT = 20;
-
-// Create trajectory for a given scene and positions.
-// Returns an object with the fat-line and the underlying CatmullRom curve.
-function createTrajectory(scene, positions) {
+function createTrajectoryHelper(scene, positions) {
   // 1. Extract a segment from the positions data (assumed same for both scenes).
   const segment = getTrajectorySegment(positions, TRAJECTORY_START, TRAJECTORY_COUNT);
   // 2. Denoise the segment with a 3-point moving median filter.
@@ -301,81 +118,304 @@ function createTrajectory(scene, positions) {
   return { line, curve };
 }
 
+// Global ColorManager (as before)
+const ColorManager = {
 
-// ─── POINT CLOUD LOADING ────────────────────────────────────────────────────
-// Loads the point cloud from JSON, computes centroids, centers points,
-// creates BufferGeometry, and returns the points and positions.
-async function loadPointCloud(scene, file, is2D, material) {
-  const data = await loadJSON(file);
-  const pointCount = data.length;
-  let sumX = 0, sumY = 0, sumZ = 0;
-  for (let i = 0; i < pointCount; i++) {
-    sumX += data[i][0];
-    sumY += data[i][1];
-    sumZ += is2D ? 0 : data[i][2];
+  async initPhaseData() {
+    if (!phaseData) {
+      phaseData = await loadBinary('./torusphase_interp.bin');
+    }
+  },
+
+  updateColors: async function(points) {
+    // If grid-cell mode but no cells are selected, revert to default.
+    if (currentColorMode === 'gridCell' && selectedCells.length === 0) {
+      currentColorMode = 'default';
+    }
+    switch (currentColorMode) {
+      case 'default':
+        this.applyDefaultColors(points);
+        break;
+      case 'gridCell':
+        await this.applyGridCellColors(points);
+        break;
+      default:
+        if (currentColorMode.startsWith('phase')) {
+          await this.applyPhaseColors(points, currentColorMode);
+        }
+        break;
+    }
+  },
+
+  applyDefaultColors: async function(points) {
+    const pointCount = points.geometry.attributes.position.count;
+    if (defaultColors) {
+      const colorAttr = points.geometry.attributes.color;
+      colorAttr.array.set(defaultColors);
+      colorAttr.needsUpdate = true;
+    }
+  },
+
+  applyGridCellColors: async function(points) {
+    const pointCount = points.geometry.attributes.position.count;
+    const colors = new Float32Array(pointCount * 3).fill(0.1);
+    for (const cellID of selectedCells) {
+      const firingRates = await loadBinary(`./fr/${cellID}.bin`);
+      const cmap = fixedColormapMapping[cellID];
+      for (let i = 0; i < pointCount; i++) {
+        const [r, g, b] = cmap(firingRates[i]);
+        colors[i * 3] += r;
+        colors[i * 3 + 1] += g;
+        colors[i * 3 + 2] += b;
+      }
+    }
+    points.geometry.attributes.color.array.set(colors);
+    points.geometry.attributes.color.needsUpdate = true;
+  },
+
+  applyPhaseColors: async function(points, phaseMode) {
+    await this.initPhaseData();
+    const pointCount = points.geometry.attributes.position.count;
+    const colors = new Float32Array(pointCount * 3);
+    let phaseIndex = (phaseMode === 'phase1') ? 0 :
+                     (phaseMode === 'phase2') ? 1 : 2;
+    for (let i = 0; i < pointCount; i++) {
+      const phaseValue = phaseData[i + phaseIndex * pointCount];
+      const [r, g, b] = hsvColormapCircular(phaseValue);
+      colors.set([r, g, b], i * 3);
+    }
+    points.geometry.attributes.color.array.set(colors);
+    points.geometry.attributes.color.needsUpdate = true;
   }
-  const centerX = sumX / pointCount;
-  const centerY = sumY / pointCount;
-  const centerZ = sumZ / pointCount;
-  const positions = new Float32Array(pointCount * 3);
-  for (let i = 0; i < pointCount; i++) {
-    positions[i * 3]     = data[i][0] - centerX;
-    positions[i * 3 + 1] = data[i][1] - centerY;
-    positions[i * 3 + 2] = is2D ? 0 : data[i][2] - centerZ;
+};
+
+
+// ─── SCENE VIEW CLASS ─────────────────────────────────────────────────────────
+//
+// The SceneView class encapsulates all functionality for a single scene.
+// It creates the scene, camera, controls, composer, and loads the point cloud.
+// It also handles updating colors and trajectory elements.
+class SceneView {
+  constructor(config) {
+    this.config = config;
+    // Create the scene and camera.
+    this.scene = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(config.fov, config.aspect, config.near, config.far);
+    this.camera.position.copy(config.cameraPosition);
+    this.camera.lookAt(new THREE.Vector3(0, 0, 0));
+    this.camera.aspect = 1;
+    this.camera.updateProjectionMatrix();
+    
+    // Create composer and bloom pass using the provided config.
+    const { composer, bloomPass } = this.createBloomPass(renderer, this.scene, this.camera, config.bloomStrength);
+    this.composer = composer;
+    this.bloomPass = bloomPass;
+
+    this.basePointSize = config.basePointSize;
+    
+    // Create OrbitControls.
+    this.controls = new OrbitControls(this.camera, renderer.domElement);
+    this.controls.enableDamping = true;
+    this.controls.autoRotate = config.autoRotate;
+    this.controls.autoRotateSpeed = config.autoRotateSpeed;
+    this.controls.enablePan = config.enablePan;
+    this.controls.enableZoom = config.enableZoom;
+    this.controls.enableRotate = config.enableRotate;
+    
+    // To be set later.
+    this.pointCloud = null;
+    this.positions = null;
+    this.trajectory = null; // { line, curve }
+    this.disc = null;
   }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  const colors = new Float32Array(pointCount * 3);
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  const points = new THREE.Points(geometry, material);
-  scene.add(points);
-  return { points, positions };
+
+  createBloomPass(strength) {
+    const composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(this.scene, this.camera));
+    const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), strength, 0.3, 0.0);
+    composer.addPass(bloomPass);
+    composer.setSize(window.innerWidth / 2, window.innerHeight);
+    return { composer, bloomPass };
+  }
+  
+  // Load the point cloud and store positions.
+  async loadPointCloud() {
+    // const { points, positions } = await loadPointCloud(this.scene, this.config.pointFile, this.config.is2D, this.config.material);
+    const data = await loadJSON(this.config.pointFile);
+    const pointCount = data.length;
+    const is2D = this.config.is2D;
+    let sumX = 0, sumY = 0, sumZ = 0;
+    for (let i = 0; i < pointCount; i++) {
+      sumX += data[i][0];
+      sumY += data[i][1];
+      sumZ += is2D ? 0 : data[i][2];
+    }
+    const centerX = sumX / pointCount;
+    const centerY = sumY / pointCount;
+    const centerZ = sumZ / pointCount;
+    const positions = new Float32Array(pointCount * 3);
+    for (let i = 0; i < pointCount; i++) {
+      positions[i * 3]     = data[i][0] - centerX;
+      positions[i * 3 + 1] = data[i][1] - centerY;
+      positions[i * 3 + 2] = is2D ? 0 : data[i][2] - centerZ;
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const colors = new Float32Array(pointCount * 3);
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const points = new THREE.Points(geometry, this.config.material);
+    this.scene.add(points);
+    this.pointCloud = points;
+    this.positions = positions;
+    ColorManager.applyDefaultColors(points);
+  }
+  
+  // Update colors for the point cloud.
+  async updateColors() {
+    if (this.pointCloud && this.positions) {
+      // console.log(defaultColors);
+      await ColorManager.updateColors(this.pointCloud, this.positions);
+    }
+  }
+  
+  // Create trajectory (line and disc) based on the loaded positions.
+  createTrajectory() {
+    if (!this.positions) return;
+    const trajObj = createTrajectoryHelper(this.scene, this.positions);
+    trajObj.line.visible = trajVisible;
+    this.trajectory = trajObj;
+    // Create a disc sprite for this trajectory.
+    const disc = new THREE.Sprite(spriteMaterial);
+    disc.scale.copy(this.config.discScale);
+    disc.position.copy(trajObj.curve.getPoint(0));
+    // Ensure the disc always renders on top.
+    disc.material.depthTest = false;
+    disc.renderOrder = 999;
+    disc.visible = trajVisible;
+    this.scene.add(disc);
+    this.disc = disc;
+  }
+  
+  // Update the position of the trajectory disc given a progress (0 to 1).
+  updateTrajectoryDisc(progress) {
+    if (this.trajectory && this.disc) {
+      const pt = this.trajectory.curve.getPoint(progress);
+      this.disc.position.copy(pt);
+    }
+  }
+  
+  // Render the scene via the composer.
+  render(tileIndex) {
+    const nTiles = (isHorzStacked) ? 2 : 3;
+    const tsz = setDrawRect(window, renderer, this.composer, isHorzStacked, nTiles, tileIndex, 0.5);
+    this.pointCloud.material.size = this.basePointSize * Math.sqrt(tsz);
+    this.composer.render();
+  }
+  
+  // Update the controls (for animation).
+  updateControls() {
+    this.controls.update();
+  }
 }
 
-let torusData = null;
-let pointsTorus, points2d;
-  
-loadPointCloud(sceneTorus, './points_umap.json', false, materialTorus)
-  .then(({ points, positions }) => {
-    pointsTorus = points;
-    torusData = positions;
-    ColorManager.applyDefaultColors(pointsTorus, torusData, 1);
-    // If trajectory display is enabled, create the trajectory line and disc for the torus scene.
-    if (showTraj) {
-      const trajTorusObj = createTrajectory(sceneTorus, positions);
-      trajLineTorus = trajTorusObj.line;
-      trajCurveTorus = trajTorusObj.curve;
-      // discTorus = createTrajectoryDisc(10);
-      discTorus = new THREE.Sprite(spriteMaterial);
-      discTorus.scale.set(1, 1, 1);
-      // Start disc at beginning of the trajectory curve.
-      discTorus.position.copy(trajCurveTorus.getPoint(0));
-      sceneTorus.add(discTorus);
-    }
-  });
-  
-loadPointCloud(scene2d, './points_2d.json', true, material2d)
-  .then(({ points, positions }) => {
-    points2d = points;
-    setTimeout(() => {
-      ColorManager.applyDefaultColors(points2d, torusData, 1);
-    }, 100);
-    if (showTraj) {
-      const traj2dObj = createTrajectory(scene2d, positions);
-      trajLine2d = traj2dObj.line;
-      trajCurve2d = traj2dObj.curve;
-      // disc2d = createTrajectoryDisc(1);
-      disc2d = new THREE.Sprite(spriteMaterial);
-      disc2d.scale.set(0.1, 0.1, 0.1);
-      disc2d.position.copy(trajCurve2d.getPoint(0));
-      scene2d.add(disc2d);
-    }
-  });
-  
-  
-// ─── UI: THUMBNAILS, PHASE MODE BUTTONS, & TRAJECTORY BUTTONS ───────────────
 
-// Setup grid-cell thumbnail UI.
+// ─── CONFIGURATION OBJECTS FOR THE TWO SCENES ───────────────────────────────
+
+const BASE_POINT_SIZE_TORUS = 0.00075 * 1.75;
+const BASE_POINT_SIZE_2D = 0.000075 * 1.75;
+
+// Torus scene configuration.
+const torusConfig = {
+  is2D: false,
+  pointFile: './points_umap.json',
+  material: new THREE.PointsMaterial({ 
+    vertexColors: true,
+    size: BASE_POINT_SIZE_TORUS,
+    map: softGlowTexture,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+  }),
+  bloomStrength: 0.5,
+  fov: 120,
+  aspect: window.innerWidth / (2 * window.innerHeight),
+  near: 0.1,
+  far: 1000,
+  cameraPosition: new THREE.Vector3(3, -6, 3),
+  autoRotate: true,
+  autoRotateSpeed: 1,
+  enablePan: false,
+  enableZoom: true,
+  enableRotate: true,
+  discScale: new THREE.Vector3(1, 1, 1),
+  basePointSize: 0.00075 * 1.75
+};
+
+// 2d scene configuration.
+const view2dConfig = {
+  is2D: true,
+  pointFile: './points_2d.json',
+  material: new THREE.PointsMaterial({
+    size: BASE_POINT_SIZE_2D,
+    vertexColors: true,
+    map: softGlowTexture,
+    transparent: true
+  }),
+  bloomStrength: 1.0,
+  fov: 120,
+  aspect: window.innerWidth / (2 * window.innerHeight),
+  near: 0.1,
+  far: 1000,
+  cameraPosition: new THREE.Vector3(0, 0, 0.6),
+  autoRotate: false,
+  autoRotateSpeed: 0,
+  enablePan: false,
+  enableZoom: false,
+  enableRotate: false,
+  discScale: new THREE.Vector3(0.1, 0.1, 0.1),
+  basePointSize: 0.000075 * 1.75
+};
+
+
+// ─── GLOBAL RENDERER SETUP ─────────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", alpha: false });
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.domElement.style.backgroundColor = 'black';
+document.body.appendChild(renderer.domElement);
+
+// ─── CREATE THE TWO SCENE VIEWS ─────────────────────────────────────────────
+const viewTorus = new SceneView(torusConfig);
+const view2d = new SceneView(view2dConfig);
+const sceneViews = [viewTorus, view2d];
+
+// Load point clouds for both scenes.
+Promise.all([
+  viewTorus.loadPointCloud(),
+  view2d.loadPointCloud()
+]).then(() => {
+  // If trajectory display is enabled, create trajectories in both scenes.
+  if (showTrajBtns) {
+    viewTorus.createTrajectory();
+    view2d.createTrajectory();
+  }
+
+  // When we have the torus position data, use this to define the default color values
+  const p = viewTorus.positions;
+  const pointCount = p.length / 3;
+  defaultColors = new Float32Array(pointCount * 3);
+  for (let i = 0; i < pointCount; i++) {
+    const [r, g, b] = viridisColormap(p[i * 3 + DEFAULT_COLOR_DIM], -4, 4);
+    defaultColors.set([r, g, b], i * 3);
+  }
+
+});
+
+
+// ─── CONSOLIDATED UI HANDLING ───────────────────────────────────────────────
+// For grid-cell thumbnails and phase mode buttons, we use your existing UI functions
+// and then broadcast the changes to both scene views.
+
 function setupThumbnails() {
   const thumbnailContainer = document.createElement('div');
   thumbnailContainer.id = 'thumbnailContainer';
@@ -398,18 +438,26 @@ function setupThumbnails() {
         img.src = `rm/${cellID}.png`;
         img.style.transform = 'rotate(-90deg)';
         img.classList.add('thumbnail');
-        // Assign a fixed colormap based on order (only three expected)
         if (index < colormaps.length) {
           fixedColormapMapping[cellID] = colormaps[index];
         }
-        img.addEventListener('click', () => toggleGridCellColor(cellID));
+        img.addEventListener('click', () => {
+          // Toggle selection
+          if (selectedCells.includes(cellID)) {
+            selectedCells = selectedCells.filter(id => id !== cellID);
+          } else {
+            selectedCells.push(cellID);
+          }
+          currentColorMode = selectedCells.length === 0 ? 'default' : 'gridCell';
+          updateAllScenesColors();
+          updateThumbnailBorders();
+        });
         thumbnailContainer.appendChild(img);
         thumbnailElements[cellID] = img;
       });
     });
 }
 
-// Setup phase mode button UI.
 function setupPhaseModeButtons() {
   const phaseContainer = document.createElement('div');
   phaseContainer.id = 'phaseButtonContainer';
@@ -426,7 +474,7 @@ function setupPhaseModeButtons() {
     btn.textContent = mode.toUpperCase();
     btn.addEventListener('click', () => {
       currentColorMode = mode;
-      updateAllPointsColors();
+      updateAllScenesColors();
     });
     phaseContainer.appendChild(btn);
   });
@@ -435,12 +483,11 @@ function setupPhaseModeButtons() {
   defaultBtn.textContent = 'DEFAULT';
   defaultBtn.addEventListener('click', () => {
     currentColorMode = 'default';
-    updateAllPointsColors();
+    updateAllScenesColors();
   });
   phaseContainer.appendChild(defaultBtn);
 }
 
-// New: Setup trajectory UI buttons.
 function setupTrajectoryButtons() {
   const trajContainer = document.createElement('div');
   trajContainer.id = 'trajButtonContainer';
@@ -452,35 +499,33 @@ function setupTrajectoryButtons() {
   trajContainer.style.gap = '10px';
   document.body.appendChild(trajContainer);
   
-  // Button 1: Toggle trajectory visibility on both scenes.
-  const toggleBtn = document.createElement('button');
-  toggleBtn.textContent = 'Toggle Trajectory';
-  toggleBtn.addEventListener('click', () => {
-    if (trajLineTorus) {
-      const newVisibility = !trajLineTorus.visible;
-      trajLineTorus.visible = newVisibility;
-      if (trajLine2d) trajLine2d.visible = newVisibility;
-      if (discTorus) discTorus.visible = newVisibility;
-      if (disc2d) disc2d.visible = newVisibility;
+  const toggleTrajBtn = document.createElement('button');
+  toggleTrajBtn.textContent = 'Toggle Trajectory';
+  toggleTrajBtn.addEventListener('click', () => {
+    // Toggle trajectory visibility in both scenes.
+    trajVisible = !trajVisible;
+    sceneViews.forEach(view => {
+      view.trajectory.line.visible = trajVisible;
+      view.disc.visible = trajVisible;
+    })
+  });
+  trajContainer.appendChild(toggleTrajBtn);
+  
+  const animateTrajBtn = document.createElement('button');
+  animateTrajBtn.textContent = 'Animate Trajectory';
+  animateTrajBtn.addEventListener('click', () => {
+    if (trajVisible) {
+      trajAnimationActive = true;
+      trajAnimationProgress = 0;
     }
   });
-  trajContainer.appendChild(toggleBtn);
-  
-  // Button 2: Animate white disc traversing the trajectory.
-  const animateBtn = document.createElement('button');
-  animateBtn.textContent = 'Animate Trajectory';
-  animateBtn.addEventListener('click', () => {
-    trajAnimationActive = true;
-    trajAnimationProgress = 0;
-  });
-  trajContainer.appendChild(animateBtn);
+  trajContainer.appendChild(animateTrajBtn);
 }
 
 function updateThumbnailBorders() {
   Object.keys(thumbnailElements).forEach(cellID => {
     const img = thumbnailElements[cellID];
     if (selectedCells.includes(cellID)) {
-      // Use the fixed mapping for border color.
       const cmap = fixedColormapMapping[cellID];
       img.style.border = `2px solid rgb(${cmap(0.75).map(v => v * 255).join(',')})`;
     } else {
@@ -489,48 +534,33 @@ function updateThumbnailBorders() {
   });
 }
 
-// Simplified toggle: add or remove cell from selection; revert to default if none selected.
-function toggleGridCellColor(cellID) {
-  if (selectedCells.includes(cellID)) {
-    selectedCells = selectedCells.filter(id => id !== cellID);
+async function updateAllScenesColors() {
+  await viewTorus.updateColors();
+  await view2d.updateColors();
+
+  if (currentColorMode === 'gridCell') {
+    viewTorus.bloomPass.strength = 1.5;
+    view2d.bloomPass.strength = 3;
   } else {
-    selectedCells.push(cellID);
+    viewTorus.bloomPass.strength = 0.5;
+    view2d.bloomPass.strength = 1.0;
   }
-  currentColorMode = selectedCells.length === 0 ? 'default' : 'gridCell';
-  updateThumbnailBorders();
-  updateAllPointsColors();
+
 }
 
-async function updateAllPointsColors() {
-  if (pointsTorus) await ColorManager.updateColors(pointsTorus, torusData);
-  if (points2d) await ColorManager.updateColors(points2d, torusData);
-}
-
-// Only set up grid-cell thumbnails, phase buttons, and trajectory buttons if enabled via URL.
-if (showGridCells) {
+// Only set up the UI if enabled via URL parameters.
+if (showGridBtns) {
   setupThumbnails();
 }
-if (showPhases) {
+if (showPhaseBtns) {
   setupPhaseModeButtons();
 }
-if (showTraj) {
+if (showTrajBtns) {
   setupTrajectoryButtons();
 }
 
 
 // ─── RESPONSIVE LAYOUT & WINDOW RESIZING ──────────────────────────────────────
-cameraTorus.position.set(3, -6, 3);
-cameraTorus.lookAt(0, 0, 0);
-camera2d.position.z = 0.6;
-cameraTorus.aspect = 1;
-camera2d.aspect = 1;
-cameraTorus.updateProjectionMatrix();
-camera2d.updateProjectionMatrix();
-
-let initialSizeSet = false;
-const STACK_CENTER_POS = 0.5;
-let isHorzStacked = true;
-
 function onWindowResize() {
   const w = window.innerWidth;
   const h = window.innerHeight;
@@ -538,43 +568,52 @@ function onWindowResize() {
   isHorzStacked = (w / h) > ASPECT_RATIO_THRESH;
   
   // Reposition UI containers.
-  let container;
-  container = document.getElementById('thumbnailContainer');
+  let container = document.getElementById('thumbnailContainer');
   if (container) container.style.top = `${window.innerHeight * (isHorzStacked ? 0.85 : 0.7)}px`;
   container = document.getElementById('phaseButtonContainer');
   if (container) container.style.top = `${window.innerHeight * (isHorzStacked ? 0.95 : 0.8)}px`;
+  
   renderer.setSize(w, h);
 }
 window.addEventListener('resize', onWindowResize);
 
+let initialized = false;
+
+// ─── ANIMATION LOOP ──────────────────────────────────────────────────────────
 function animate() {
+
   requestAnimationFrame(animate);
-  controlsTorus.update();
+
+  // When all data is loaded (which we confirm by checking that "defaultColors" is initialized),
+  // we run some initial routines to initialize the dynamic properties of the UI elements
+  // (namely the colors and positions/sizes).
+  if (!initialized) {
+    // Wait until data is loaded before rendering anything
+    if (defaultColors) {
+      updateAllScenesColors() // apply default colors to point-cloud plots 
+      onWindowResize() // set proportions
+      initialized = true;
+    } else {
+      return;
+    }
+  }
   
-  // Animate the disc along the trajectory if the animation is active.
-  if (showTraj && trajAnimationActive && trajCurveTorus && trajCurve2d) {
-    trajAnimationProgress += 0.002;   // sets the animation speed
+  // Update each scene view.
+  sceneViews.forEach(view => {view.updateControls()});
+  
+  // If trajectory animation is active, update disc positions in both scenes.
+  if (showTrajBtns && trajAnimationActive && viewTorus.trajectory && view2d.trajectory) {
+    trajAnimationProgress += 0.002; // adjust speed as needed
     if (trajAnimationProgress >= 1) {
       trajAnimationProgress = 1;
       trajAnimationActive = false;
     }
-    const pointTorus = trajCurveTorus.getPoint(trajAnimationProgress);
-    const point2d = trajCurve2d.getPoint(trajAnimationProgress);
-    if (discTorus){
-      discTorus.position.copy(pointTorus);
-    }
-    if (disc2d) disc2d.position.copy(point2d);
+    sceneViews.forEach(view => {view.updateTrajectoryDisc(trajAnimationProgress)});
   }
-  
+
   renderer.setScissorTest(true);
-  const nTiles = isHorzStacked ? 2 : 3;
-  const tsz = setDrawRect(window, renderer, composerTorus, isHorzStacked, nTiles, 0, STACK_CENTER_POS);
-  const scaleFactor = Math.sqrt(tsz);
-  materialTorus.size = BASE_POINT_SIZE_TORUS * scaleFactor;
-  material2d.size = BASE_POINT_SIZE_2D * scaleFactor;
-  composerTorus.render();
-  setDrawRect(window, renderer, composer2d, isHorzStacked, nTiles, 1, STACK_CENTER_POS);
-  composer2d.render();
+  viewTorus.render(0);
+  view2d.render(1);
   renderer.setScissorTest(false);
 }
 
