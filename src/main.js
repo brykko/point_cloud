@@ -4,9 +4,12 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 
+// ─── URL PARAMETERS: SHOW UI CONTROLS ─────────────────────────────────────────
+const urlParams = new URLSearchParams(window.location.search);
+const showGridCells = urlParams.get('showGridCells') === 'true';
+const showPhases = urlParams.get('showPhases') === 'true';
+
 // ─── CONSTANTS & GLOBAL STATE ────────────────────────────────────────────────
-const NUM_CELLS = 199;
-const MAX_SELECTED_CELLS = 3;
 const BASE_POINT_SIZE_TORUS = 0.00075 * 1.75;
 const BASE_POINT_SIZE_2D = 0.000075 * 1.75;
 
@@ -171,15 +174,36 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.domElement.style.backgroundColor = 'black';
 document.body.appendChild(renderer.domElement);
 
-const composerTorus = new EffectComposer(renderer);
-composerTorus.addPass(new RenderPass(sceneTorus, cameraTorus));
-composerTorus.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.5, 0.3, 0.0));
-composerTorus.setSize(window.innerWidth / 2, window.innerHeight);
+function createBloomPass(renderer, scene, camera, strength) {
+  const composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), strength, 0.3, 0.0)
+  composer.addPass(bloomPass);
+  composer.setSize(window.innerWidth / 2, window.innerHeight);
+  return {composer, bloomPass};
+}
 
-const composer2d = new EffectComposer(renderer);
-composer2d.addPass(new RenderPass(scene2d, camera2d));
-composer2d.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.0, 0.3, 0.0));
-composer2d.setSize(window.innerWidth / 2, window.innerHeight);
+const {composer: composerTorus, bloomPass: bloomPassTorus} = createBloomPass(renderer, sceneTorus, cameraTorus, 0.5);
+const {composer: composer2d, bloomPass: bloomPass2d} = createBloomPass(renderer, scene2d, camera2d, 1.0);
+
+// The "bloom" effect needs boosting when we display the single-grid-cell data.
+function updateBloomStrength() {
+  if (currentColorMode === 'gridCell') {
+    bloomPassTorus.strength = 1.5; // stronger glow for grid-cell mode
+    bloomPass2d.strength = 3;
+  } else {
+    bloomPassTorus.strength = 0.5; // default glow
+    bloomPass2d.strength = 1.0;
+  }
+}
+
+// Call updateBloomStrength() each time the color mode changes or in your animation loop:
+updateAllPointsColors = async function() {
+  if (pointsTorus) await ColorManager.updateColors(pointsTorus, torusData);
+  if (points2d) await ColorManager.updateColors(points2d, torusData);
+  updateBloomStrength();
+}
+
 
 const controlsTorus = new OrbitControls(cameraTorus, renderer.domElement);
 controlsTorus.enableDamping = true;
@@ -270,7 +294,6 @@ loadPointCloud(scene2d, './points_2d.json', true, material2d)
   });
 
 // ─── UI: THUMBNAILS & PHASE MODE BUTTONS ─────────────────────────────────────
-// Use a unique ID for the thumbnail container.
 function setupThumbnails() {
   const thumbnailContainer = document.createElement('div');
   thumbnailContainer.id = 'thumbnailContainer';
@@ -306,12 +329,14 @@ function setupThumbnails() {
 
 function setupPhaseModeButtons() {
   const phaseContainer = document.createElement('div');
+  phaseContainer.id = 'phaseButtonContainer';
   phaseContainer.style.position = 'absolute';
-  phaseContainer.style.bottom = '10px';
+  // phaseContainer.style.bottom = '5%';
   phaseContainer.style.left = '50%';
   phaseContainer.style.transform = 'translateX(-50%)';
   phaseContainer.style.display = 'flex';
   phaseContainer.style.gap = '10px';
+  phaseContainer.style.justifyContent = 'center';
   document.body.appendChild(phaseContainer);
 
   ['phase1', 'phase2', 'phase3'].forEach(mode => {
@@ -352,7 +377,6 @@ function toggleGridCellColor(cellID) {
   if (selectedCells.includes(cellID)) {
     selectedCells = selectedCells.filter(id => id !== cellID);
   } else {
-    // Since only three grid cells exist, we don't need to check for MAX_SELECTED_CELLS.
     selectedCells.push(cellID);
   }
   currentColorMode = selectedCells.length === 0 ? 'default' : 'gridCell';
@@ -365,8 +389,13 @@ async function updateAllPointsColors() {
   if (points2d) await ColorManager.updateColors(points2d, torusData);
 }
 
-setupThumbnails();
-setupPhaseModeButtons();
+// Only set up the grid-cell thumbnails and phase buttons if enabled via URL.
+if (showGridCells) {
+  setupThumbnails();
+}
+if (showPhases) {
+  setupPhaseModeButtons();
+}
 
 // ─── RESPONSIVE LAYOUT & WINDOW RESIZING ──────────────────────────────────────
 cameraTorus.position.set(3, -6, 3);
@@ -387,39 +416,40 @@ function onWindowResize() {
   const ASPECT_RATIO_THRESH = 1.0;
   const aspectRatio = w / h;
   isHorzStacked = aspectRatio > ASPECT_RATIO_THRESH;
-  const thumbnailContainer = document.getElementById('thumbnailContainer');
-  if (thumbnailContainer) {
-    thumbnailContainer.style.top = `${window.innerHeight * (isHorzStacked ? 0.85 : 2/3)}px`;
+
+  // Reposition button containers
+
+  let container
+  container = document.getElementById('thumbnailContainer');
+  if (container) {
+    container.style.top = `${window.innerHeight * (isHorzStacked ? 0.85 : 0.7)}px`;
   }
+
+  container = document.getElementById('phaseButtonContainer');
+  if (container) {
+    container.style.top = `${window.innerHeight * (isHorzStacked ? 0.95 : 0.8)}px`;
+  }
+
   renderer.setSize(w, h);
 }
 window.addEventListener('resize', onWindowResize);
 
 function setDrawRect(windowObj, renderer, composer, isHorz, numDivs, tileIndex, centerN) {
-  // This function sets the rendering dimensions for a specified "tile" within the window,
-  // dividing on either the horizontal or vertical axis.
-
   if (!initialSizeSet && points2d && pointsTorus) {
     onWindowResize();
     initialSizeSet = true;
   }
   const w = windowObj.innerWidth;
   const h = windowObj.innerHeight;
-  let wszT; // window size in tiled dimension
-  let wszN; // window size in non-tiled dimension
+  let wszT;
+  let wszN;
   if (isHorz) {
-    // Stack horizontally (width is T dim)
     wszT = w;
     wszN = h;
   } else {
-    // Stack vertically (height is T dim)
     wszT = h;
     wszN = w;
   }
-
-  // We will position tiles to completely span T.
-  // For N, the fraction available for use depends on the specified centering
-  // position (argument "centerN") of the tiles on this axis.
   let fracNAvailable;
   if (centerN > 0.5) {
     fracNAvailable = (1 - centerN) * 2;
@@ -429,25 +459,15 @@ function setDrawRect(windowObj, renderer, composer, isHorz, numDivs, tileIndex, 
     fracNAvailable = 1;
   }
   const wszNAvailable = wszN * fracNAvailable;
-
-  // Calculate the tile size
-  const tlenT = wszT / numDivs; // full length in T
-  const tlenN = wszN;           // full length in N
-  const tlenView = Math.min(tlenT, wszNAvailable); // length of the actual view (which is square)
-
-  // Calculate offset of the view position with respect to its tile
+  const tlenT = wszT / numDivs;
+  const tlenN = wszN;
+  const tlenView = Math.min(tlenT, wszNAvailable);
   const viewTileOffsetT = (tlenT - tlenView) / 2;
   const viewTileOffsetN = (tlenN - tlenView) * centerN;
-
-  // Calculate tile position in window
   const posTileT = isHorz ? (tileIndex * tlenT) : ((numDivs - tileIndex - 1) * tlenT);
   const posTileN = 0;
-
-  // The view position is the tile position, plus the view offset
   const posViewT = posTileT + viewTileOffsetT;
   const posViewN = posTileN + viewTileOffsetN;
-
-  // Apply the 
   if (isHorz) {
     renderer.setScissor(posTileT, posTileN, tlenT, tlenN);
     renderer.setViewport(posViewT, posViewN, tlenView, tlenView);
@@ -455,8 +475,6 @@ function setDrawRect(windowObj, renderer, composer, isHorz, numDivs, tileIndex, 
     renderer.setScissor(posTileN, posTileT, tlenN, tlenT);
     renderer.setViewport(posViewN, posViewT, tlenView, tlenView);
   }
-
-  // The EffectComposer size needs to equal the viewport size, to avoid distortions.
   if (composer) {
     composer.setSize(tlenView, tlenView);
   }
@@ -467,27 +485,15 @@ function setDrawRect(windowObj, renderer, composer, isHorz, numDivs, tileIndex, 
 function animate() {
   requestAnimationFrame(animate);
   controlsTorus.update();
-
   renderer.setScissorTest(true);
-
-  // If the window is "tall", we split it into three tiles, using the bottom one to
-  // host the thumbnails and buttons. If it's "wide", two tiles looks nicer, and we can
-  // squeeze the controls in at the bottom.
-  
   const nTiles = isHorzStacked ? 2 : 3;
-
-  // Update the 
   const tsz = setDrawRect(window, renderer, composerTorus, isHorzStacked, nTiles, 0, STACK_CENTER_POS);
-  
-  // Scale the point sizes with the size of the tiles 
   const scaleFactor = Math.sqrt(tsz);
   materialTorus.size = BASE_POINT_SIZE_TORUS * scaleFactor;
   material2d.size = BASE_POINT_SIZE_2D * scaleFactor;
   composerTorus.render();
-
   setDrawRect(window, renderer, composer2d, isHorzStacked, nTiles, 1, STACK_CENTER_POS);
   composer2d.render();
-
   renderer.setScissorTest(false);
 }
 
