@@ -396,20 +396,30 @@ function onWindowResize() {
 window.addEventListener('resize', onWindowResize);
 
 function setDrawRect(windowObj, renderer, composer, isHorz, numDivs, tileIndex, centerN) {
+  // This function sets the rendering dimensions for a specified "tile" within the window,
+  // dividing on either the horizontal or vertical axis.
+
   if (!initialSizeSet && points2d && pointsTorus) {
     onWindowResize();
     initialSizeSet = true;
   }
   const w = windowObj.innerWidth;
   const h = windowObj.innerHeight;
-  let wszT, wszN;
+  let wszT; // window size in tiled dimension
+  let wszN; // window size in non-tiled dimension
   if (isHorz) {
+    // Stack horizontally (width is T dim)
     wszT = w;
     wszN = h;
   } else {
+    // Stack vertically (height is T dim)
     wszT = h;
     wszN = w;
   }
+
+  // We will position tiles to completely span T.
+  // For N, the fraction available for use depends on the specified centering
+  // position (argument "centerN") of the tiles on this axis.
   let fracNAvailable;
   if (centerN > 0.5) {
     fracNAvailable = (1 - centerN) * 2;
@@ -419,22 +429,34 @@ function setDrawRect(windowObj, renderer, composer, isHorz, numDivs, tileIndex, 
     fracNAvailable = 1;
   }
   const wszNAvailable = wszN * fracNAvailable;
-  const tlenView = Math.min(wszT / numDivs, wszNAvailable);
-  const tlenT = wszT / numDivs;
-  const tlenN = wszN;
-  const tLenViewOffsetT = (tlenT - tlenView) / 2;
-  const tLenViewOffsetN = (tlenN - tlenView) * centerN;
-  const offFullT = isHorz ? (tileIndex * tlenT) : ((numDivs - tileIndex - 1) * tlenT);
-  const offFullN = 0;
-  const offViewT = offFullT + tLenViewOffsetT;
-  const offViewN = offFullN + tLenViewOffsetN;
+
+  // Calculate the tile size
+  const tlenT = wszT / numDivs; // full length in T
+  const tlenN = wszN;           // full length in N
+  const tlenView = Math.min(tlenT, wszNAvailable); // length of the actual view (which is square)
+
+  // Calculate offset of the view position with respect to its tile
+  const viewTileOffsetT = (tlenT - tlenView) / 2;
+  const viewTileOffsetN = (tlenN - tlenView) * centerN;
+
+  // Calculate tile position in window
+  const posTileT = isHorz ? (tileIndex * tlenT) : ((numDivs - tileIndex - 1) * tlenT);
+  const posTileN = 0;
+
+  // The view position is the tile position, plus the view offset
+  const posViewT = posTileT + viewTileOffsetT;
+  const posViewN = posTileN + viewTileOffsetN;
+
+  // Apply the 
   if (isHorz) {
-    renderer.setScissor(offFullT, offFullN, tlenT, tlenN);
-    renderer.setViewport(offViewT, offViewN, tlenView, tlenView);
+    renderer.setScissor(posTileT, posTileN, tlenT, tlenN);
+    renderer.setViewport(posViewT, posViewN, tlenView, tlenView);
   } else {
-    renderer.setScissor(offFullN, offFullT, tlenN, tlenT);
-    renderer.setViewport(offViewN, offViewT, tlenView, tlenView);
+    renderer.setScissor(posTileN, posTileT, tlenN, tlenT);
+    renderer.setViewport(posViewN, posViewT, tlenView, tlenView);
   }
+
+  // The EffectComposer size needs to equal the viewport size, to avoid distortions.
   if (composer) {
     composer.setSize(tlenView, tlenView);
   }
@@ -446,14 +468,19 @@ function animate() {
   requestAnimationFrame(animate);
   controlsTorus.update();
 
-  renderer.setScissorTest(false);
-  renderer.clear();
   renderer.setScissorTest(true);
 
+  // If the window is "tall", we split it into three tiles, using the bottom one to
+  // host the thumbnails and buttons. If it's "wide", two tiles looks nicer, and we can
+  // squeeze the controls in at the bottom.
+  
   const nTiles = isHorzStacked ? 2 : 3;
-  const tsz = setDrawRect(window, renderer, composerTorus, isHorzStacked, nTiles, 0, STACK_CENTER_POS);
-  const scaleFactor = Math.sqrt(tsz);
 
+  // Update the 
+  const tsz = setDrawRect(window, renderer, composerTorus, isHorzStacked, nTiles, 0, STACK_CENTER_POS);
+  
+  // Scale the point sizes with the size of the tiles 
+  const scaleFactor = Math.sqrt(tsz);
   materialTorus.size = BASE_POINT_SIZE_TORUS * scaleFactor;
   material2d.size = BASE_POINT_SIZE_2D * scaleFactor;
   composerTorus.render();
