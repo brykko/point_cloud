@@ -3,11 +3,18 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+// Import fat-line classes for thicker trajectory lines:
+import { Line2 } from 'three/examples/jsm/lines/Line2.js';
+import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
+
 
 // ─── URL PARAMETERS: SHOW UI CONTROLS ─────────────────────────────────────────
 const urlParams = new URLSearchParams(window.location.search);
 const showGridCells = urlParams.get('showGridCells') === 'true';
 const showPhases = urlParams.get('showPhases') === 'true';
+const showTraj = urlParams.get('showTraj') === 'true';
+
 
 // ─── CONSTANTS & GLOBAL STATE ────────────────────────────────────────────────
 const BASE_POINT_SIZE_TORUS = 0.00075 * 1.75;
@@ -28,6 +35,14 @@ const colormaps = [hotColormap, coolColormap, magentaColormap];
 // Global cache for phase data (3-column matrix)
 let phaseData = null;
 
+// Trajectory globals
+let trajLineTorus, trajLine2d;      // fat-line objects for trajectory visualization
+let trajCurveTorus, trajCurve2d;    // CatmullRomCurve3 curves for each scene (for smooth interpolation)
+let discTorus, disc2d;              // disc objects that will animate along the trajectory
+let trajAnimationActive = false;    // flag for trajectory animation
+let trajAnimationProgress = 0;        // progress (0-1) along the trajectory curve
+
+
 // ─── UTILITY DATA LOADER FUNCTIONS ───────────────────────────────────────────
 async function loadJSON(url) {
   const response = await fetch(url);
@@ -39,6 +54,7 @@ async function loadBinary(url) {
   const buffer = await response.arrayBuffer();
   return new Float32Array(buffer);
 }
+
 
 // ─── COLORMAP FUNCTIONS ───────────────────────────────────────────────────────
 function viridisColormap(value, limLo, limHi) {
@@ -92,6 +108,7 @@ function magentaColormap(value) {
   let t = Math.max(0, Math.min(1, value));
   return [Math.max(0, Math.min(1, t * 3 - 1)), 0, Math.max(0, Math.min(1, t * 2 - 1))];
 }
+
 
 // ─── COLOR MANAGER MODULE ─────────────────────────────────────────────────────
 const ColorManager = {
@@ -162,6 +179,7 @@ const ColorManager = {
   }
 };
 
+
 // ─── SCENE, CAMERA, RENDERER & CONTROLS SETUP ───────────────────────────────
 const sceneTorus = new THREE.Scene();
 const scene2d = new THREE.Scene();
@@ -174,17 +192,18 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.domElement.style.backgroundColor = 'black';
 document.body.appendChild(renderer.domElement);
 
+// ─── EFFECT COMPOSER & BLOOM SETUP ───────────────────────────────────────────
 function createBloomPass(renderer, scene, camera, strength) {
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
-  const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), strength, 0.3, 0.0)
+  const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), strength, 0.3, 0.0);
   composer.addPass(bloomPass);
   composer.setSize(window.innerWidth / 2, window.innerHeight);
-  return {composer, bloomPass};
+  return { composer, bloomPass };
 }
 
-const {composer: composerTorus, bloomPass: bloomPassTorus} = createBloomPass(renderer, sceneTorus, cameraTorus, 0.5);
-const {composer: composer2d, bloomPass: bloomPass2d} = createBloomPass(renderer, scene2d, camera2d, 1.0);
+const { composer: composerTorus, bloomPass: bloomPassTorus } = createBloomPass(renderer, sceneTorus, cameraTorus, 0.5);
+const { composer: composer2d, bloomPass: bloomPass2d } = createBloomPass(renderer, scene2d, camera2d, 1.0);
 
 // The "bloom" effect needs boosting when we display the single-grid-cell data.
 function updateBloomStrength() {
@@ -202,8 +221,7 @@ updateAllPointsColors = async function() {
   if (pointsTorus) await ColorManager.updateColors(pointsTorus, torusData);
   if (points2d) await ColorManager.updateColors(points2d, torusData);
   updateBloomStrength();
-}
-
+};
 
 const controlsTorus = new OrbitControls(cameraTorus, renderer.domElement);
 controlsTorus.enableDamping = true;
@@ -218,24 +236,25 @@ controls2d.enableRotate = false;
 controls2d.enablePan = false;
 controls2d.enableZoom = false;
 
+
 // ─── SOFT GLOW TEXTURE SETUP ──────────────────────────────────────────────────
-const canvas = document.createElement('canvas');
-canvas.width = 128;
-canvas.height = 128;
-const ctx = canvas.getContext('2d');
+const canvasTexture = document.createElement('canvas');
+canvasTexture.width = 128;
+canvasTexture.height = 128;
+const ctx = canvasTexture.getContext('2d');
 const gradient = ctx.createRadialGradient(64, 64, 10, 64, 64, 64);
-gradient.addColorStop(0, 'rgba(255,255,255,0.3)');
-gradient.addColorStop(1, 'rgba(255,255,255,0)');
+gradient.addColorStop(0, 'rgba(255,255,255,0.3)');  // Bright center
+gradient.addColorStop(1, 'rgba(255,255,255,0)');    // Fading edge
 ctx.fillStyle = gradient;
 ctx.fillRect(0, 0, 128, 128);
-const texture = new THREE.CanvasTexture(canvas);
+const texture = new THREE.CanvasTexture(canvasTexture);
 texture.encoding = THREE.SRGBColorSpace;
 
 const materialTorus = new THREE.PointsMaterial({ 
   vertexColors: true,
   size: BASE_POINT_SIZE_TORUS,
-  map: texture,
-  transparent: true,
+  map: texture,           // Apply soft glow texture
+  transparent: true,      // Enable transparency
   blending: THREE.AdditiveBlending,
   depthWrite: false
 });
@@ -243,11 +262,104 @@ const materialTorus = new THREE.PointsMaterial({
 const material2d = new THREE.PointsMaterial({
   size: BASE_POINT_SIZE_2D,
   vertexColors: true,
-  map: texture,
+  map: texture,           // Use the same texture
   transparent: true
 });
 
+
+// ─── TRAJECTORY PLOTTING ────────────────────────────────────────────────────
+
+// Helper: Extract a segment of points from a flat Float32Array of positions.
+// `positions` is a Float32Array of length (N * 3)
+// `startIdx` is the index (in point-space, not array index) of the first point,
+// and `count` is the number of points to extract.
+function getTrajectorySegment(positions, startIdx, count) {
+  const segment = [];
+  const totalPoints = positions.length / 3;
+  // Clamp the end to the available points.
+  const endIdx = Math.min(startIdx + count, totalPoints);
+  for (let i = startIdx; i < endIdx; i++) {
+    segment.push({ x: positions[i * 3], y: positions[i * 3 + 1], z: positions[i * 3 + 2] });
+  }
+  return segment;
+}
+
+// Helper: 3-point moving median filter.
+// Given an array of {x, y, z} objects, smooth each coordinate by taking
+// the median of the previous, current, and next values.
+// The first and last points remain unchanged.
+function medianFilter(points) {
+  if (points.length < 3) return points;
+  const filtered = [];
+  filtered.push(points[0]); // keep first point unchanged
+  for (let i = 1; i < points.length - 1; i++) {
+    const neighbors = [points[i - 1], points[i], points[i + 1]];
+    const xs = neighbors.map(p => p.x).sort((a, b) => a - b);
+    const ys = neighbors.map(p => p.y).sort((a, b) => a - b);
+    const zs = neighbors.map(p => p.z).sort((a, b) => a - b);
+    filtered.push({ x: xs[1], y: ys[1], z: zs[1] });
+  }
+  filtered.push(points[points.length - 1]); // keep last point unchanged
+  return filtered;
+}
+
+// New Helper: Create a fat (thick) trajectory line using CatmullRom spline and upsampling.
+function createFatTrajectoryLine(filteredPoints) {
+  // Convert filtered points to an array of THREE.Vector3
+  const vectorPoints = filteredPoints.map(p => new THREE.Vector3(p.x, p.y, p.z));
+  // Create a CatmullRomCurve3 to smoothly interpolate points.
+  const curve = new THREE.CatmullRomCurve3(vectorPoints);
+  // Upsample the curve with 100 points for extra smoothness.
+  const upsampledPoints = curve.getPoints(100);
+  // Flatten points for LineGeometry.
+  const positionsArray = [];
+  upsampledPoints.forEach(pt => { positionsArray.push(pt.x, pt.y, pt.z); });
+  const lineGeom = new LineGeometry();
+  lineGeom.setPositions(positionsArray);
+  // Create a fat line material. Note: linewidth is in pixels.
+  const lineMat = new LineMaterial({
+    color: 0xffffff,
+    linewidth: 3,
+    resolution: new THREE.Vector2(window.innerWidth, window.innerHeight),
+    dashed: false,
+  });
+  const fatLine = new Line2(lineGeom, lineMat);
+  fatLine.computeLineDistances();
+  fatLine.scale.set(1, 1, 1);
+  return { line: fatLine, curve: curve };
+}
+
+// Helper: Create a white disc to traverse the trajectory.
+function createTrajectoryDisc(size) {
+  const geometry = new THREE.SphereGeometry(0.05, 16, 16);
+  const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  const disc = new THREE.Mesh(geometry, material);
+  disc.scale.set(size, size, size);
+  return disc;
+}
+
+// Parameters for trajectory extraction.
+const TRAJECTORY_START = 50;
+const TRAJECTORY_COUNT = 20;
+
+// Create trajectory for a given scene and positions.
+// Returns an object with the fat-line and the underlying CatmullRom curve.
+function createTrajectory(scene, positions) {
+  // 1. Extract a segment from the positions data (assumed same for both scenes).
+  const segment = getTrajectorySegment(positions, TRAJECTORY_START, TRAJECTORY_COUNT);
+  // 2. Denoise the segment with a 3-point moving median filter.
+  const filteredSegment = medianFilter(segment);
+  // 3. Create a fat line from the filtered segment using a CatmullRom spline for smoothness.
+  const { line, curve } = createFatTrajectoryLine(filteredSegment);
+  // Add the trajectory line to the scene.
+  scene.add(line);
+  return { line, curve };
+}
+
+
 // ─── POINT CLOUD LOADING ────────────────────────────────────────────────────
+// Loads the point cloud from JSON, computes centroids, centers points,
+// creates BufferGeometry, and returns the points and positions.
 async function loadPointCloud(scene, file, is2D, material) {
   const data = await loadJSON(file);
   const pointCount = data.length;
@@ -277,23 +389,44 @@ async function loadPointCloud(scene, file, is2D, material) {
 
 let torusData = null;
 let pointsTorus, points2d;
-
+  
 loadPointCloud(sceneTorus, './points_umap.json', false, materialTorus)
   .then(({ points, positions }) => {
     pointsTorus = points;
     torusData = positions;
     ColorManager.applyDefaultColors(pointsTorus, torusData, 1);
+    // If trajectory display is enabled, create the trajectory line and disc for the torus scene.
+    if (showTraj) {
+      const trajTorusObj = createTrajectory(sceneTorus, positions);
+      trajLineTorus = trajTorusObj.line;
+      trajCurveTorus = trajTorusObj.curve;
+      discTorus = createTrajectoryDisc(10);
+      // Start disc at beginning of the trajectory curve.
+      discTorus.position.copy(trajCurveTorus.getPoint(0));
+      sceneTorus.add(discTorus);
+    }
   });
-
+  
 loadPointCloud(scene2d, './points_2d.json', true, material2d)
-  .then(({ points }) => {
+  .then(({ points, positions }) => {
     points2d = points;
     setTimeout(() => {
       ColorManager.applyDefaultColors(points2d, torusData, 1);
     }, 100);
+    if (showTraj) {
+      const traj2dObj = createTrajectory(scene2d, positions);
+      trajLine2d = traj2dObj.line;
+      trajCurve2d = traj2dObj.curve;
+      disc2d = createTrajectoryDisc(1);
+      disc2d.position.copy(trajCurve2d.getPoint(0));
+      scene2d.add(disc2d);
+    }
   });
+  
+  
+// ─── UI: THUMBNAILS, PHASE MODE BUTTONS, & TRAJECTORY BUTTONS ───────────────
 
-// ─── UI: THUMBNAILS & PHASE MODE BUTTONS ─────────────────────────────────────
+// Setup grid-cell thumbnail UI.
 function setupThumbnails() {
   const thumbnailContainer = document.createElement('div');
   thumbnailContainer.id = 'thumbnailContainer';
@@ -316,7 +449,7 @@ function setupThumbnails() {
         img.src = `rm/${cellID}.png`;
         img.style.transform = 'rotate(-90deg)';
         img.classList.add('thumbnail');
-        // Assign a fixed colormap based on the order (only three expected)
+        // Assign a fixed colormap based on order (only three expected)
         if (index < colormaps.length) {
           fixedColormapMapping[cellID] = colormaps[index];
         }
@@ -327,11 +460,11 @@ function setupThumbnails() {
     });
 }
 
+// Setup phase mode button UI.
 function setupPhaseModeButtons() {
   const phaseContainer = document.createElement('div');
   phaseContainer.id = 'phaseButtonContainer';
   phaseContainer.style.position = 'absolute';
-  // phaseContainer.style.bottom = '5%';
   phaseContainer.style.left = '50%';
   phaseContainer.style.transform = 'translateX(-50%)';
   phaseContainer.style.display = 'flex';
@@ -348,7 +481,7 @@ function setupPhaseModeButtons() {
     });
     phaseContainer.appendChild(btn);
   });
-
+  
   const defaultBtn = document.createElement('button');
   defaultBtn.textContent = 'DEFAULT';
   defaultBtn.addEventListener('click', () => {
@@ -356,6 +489,42 @@ function setupPhaseModeButtons() {
     updateAllPointsColors();
   });
   phaseContainer.appendChild(defaultBtn);
+}
+
+// New: Setup trajectory UI buttons.
+function setupTrajectoryButtons() {
+  const trajContainer = document.createElement('div');
+  trajContainer.id = 'trajButtonContainer';
+  trajContainer.style.position = 'absolute';
+  trajContainer.style.right = '10px';
+  trajContainer.style.bottom = '10px';
+  trajContainer.style.display = 'flex';
+  trajContainer.style.flexDirection = 'column';
+  trajContainer.style.gap = '10px';
+  document.body.appendChild(trajContainer);
+  
+  // Button 1: Toggle trajectory visibility on both scenes.
+  const toggleBtn = document.createElement('button');
+  toggleBtn.textContent = 'Toggle Trajectory';
+  toggleBtn.addEventListener('click', () => {
+    if (trajLineTorus) {
+      const newVisibility = !trajLineTorus.visible;
+      trajLineTorus.visible = newVisibility;
+      if (trajLine2d) trajLine2d.visible = newVisibility;
+      if (discTorus) discTorus.visible = newVisibility;
+      if (disc2d) disc2d.visible = newVisibility;
+    }
+  });
+  trajContainer.appendChild(toggleBtn);
+  
+  // Button 2: Animate white disc traversing the trajectory.
+  const animateBtn = document.createElement('button');
+  animateBtn.textContent = 'Animate Trajectory';
+  animateBtn.addEventListener('click', () => {
+    trajAnimationActive = true;
+    trajAnimationProgress = 0;
+  });
+  trajContainer.appendChild(animateBtn);
 }
 
 function updateThumbnailBorders() {
@@ -371,8 +540,7 @@ function updateThumbnailBorders() {
   });
 }
 
-// Simplified toggle: simply add or remove the cell from the selection.
-// If no cells remain selected, revert to default mode.
+// Simplified toggle: add or remove cell from selection; revert to default if none selected.
 function toggleGridCellColor(cellID) {
   if (selectedCells.includes(cellID)) {
     selectedCells = selectedCells.filter(id => id !== cellID);
@@ -389,13 +557,17 @@ async function updateAllPointsColors() {
   if (points2d) await ColorManager.updateColors(points2d, torusData);
 }
 
-// Only set up the grid-cell thumbnails and phase buttons if enabled via URL.
+// Only set up grid-cell thumbnails, phase buttons, and trajectory buttons if enabled via URL.
 if (showGridCells) {
   setupThumbnails();
 }
 if (showPhases) {
   setupPhaseModeButtons();
 }
+if (showTraj) {
+  setupTrajectoryButtons();
+}
+
 
 // ─── RESPONSIVE LAYOUT & WINDOW RESIZING ──────────────────────────────────────
 cameraTorus.position.set(3, -6, 3);
@@ -414,22 +586,14 @@ function onWindowResize() {
   const w = window.innerWidth;
   const h = window.innerHeight;
   const ASPECT_RATIO_THRESH = 1.0;
-  const aspectRatio = w / h;
-  isHorzStacked = aspectRatio > ASPECT_RATIO_THRESH;
-
-  // Reposition button containers
-
-  let container
+  isHorzStacked = (w / h) > ASPECT_RATIO_THRESH;
+  
+  // Reposition UI containers.
+  let container;
   container = document.getElementById('thumbnailContainer');
-  if (container) {
-    container.style.top = `${window.innerHeight * (isHorzStacked ? 0.85 : 0.7)}px`;
-  }
-
+  if (container) container.style.top = `${window.innerHeight * (isHorzStacked ? 0.85 : 0.7)}px`;
   container = document.getElementById('phaseButtonContainer');
-  if (container) {
-    container.style.top = `${window.innerHeight * (isHorzStacked ? 0.95 : 0.8)}px`;
-  }
-
+  if (container) container.style.top = `${window.innerHeight * (isHorzStacked ? 0.95 : 0.8)}px`;
   renderer.setSize(w, h);
 }
 window.addEventListener('resize', onWindowResize);
@@ -441,23 +605,9 @@ function setDrawRect(windowObj, renderer, composer, isHorz, numDivs, tileIndex, 
   }
   const w = windowObj.innerWidth;
   const h = windowObj.innerHeight;
-  let wszT;
-  let wszN;
-  if (isHorz) {
-    wszT = w;
-    wszN = h;
-  } else {
-    wszT = h;
-    wszN = w;
-  }
-  let fracNAvailable;
-  if (centerN > 0.5) {
-    fracNAvailable = (1 - centerN) * 2;
-  } else if (centerN < 0.5) {
-    fracNAvailable = centerN * 2;
-  } else {
-    fracNAvailable = 1;
-  }
+  let wszT = isHorz ? w : h;
+  let wszN = isHorz ? h : w;
+  let fracNAvailable = centerN > 0.5 ? (1 - centerN) * 2 : (centerN < 0.5 ? centerN * 2 : 1);
   const wszNAvailable = wszN * fracNAvailable;
   const tlenT = wszT / numDivs;
   const tlenN = wszN;
@@ -475,16 +625,30 @@ function setDrawRect(windowObj, renderer, composer, isHorz, numDivs, tileIndex, 
     renderer.setScissor(posTileN, posTileT, tlenN, tlenT);
     renderer.setViewport(posViewN, posViewT, tlenView, tlenView);
   }
-  if (composer) {
-    composer.setSize(tlenView, tlenView);
-  }
+  if (composer) composer.setSize(tlenView, tlenView);
   return tlenView;
 }
 
-// ─── ANIMATION LOOP ──────────────────────────────────────────────────────────
 function animate() {
   requestAnimationFrame(animate);
   controlsTorus.update();
+  
+  // Animate the disc along the trajectory if the animation is active.
+  if (showTraj && trajAnimationActive && trajCurveTorus && trajCurve2d) {
+    trajAnimationProgress += 0.005;
+    if (trajAnimationProgress >= 1) {
+      trajAnimationProgress = 1;
+      trajAnimationActive = false;
+    }
+    const pointTorus = trajCurveTorus.getPoint(trajAnimationProgress);
+    const point2d = trajCurve2d.getPoint(trajAnimationProgress);
+    if (discTorus){
+      discTorus.position.copy(pointTorus);
+      discTorus.lookAt(cameraTorus);
+    }
+    if (disc2d) disc2d.position.copy(point2d);
+  }
+  
   renderer.setScissorTest(true);
   const nTiles = isHorzStacked ? 2 : 3;
   const tsz = setDrawRect(window, renderer, composerTorus, isHorzStacked, nTiles, 0, STACK_CENTER_POS);
