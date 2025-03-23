@@ -648,7 +648,7 @@ function animate() {
   
   // Animate the disc along the trajectory if the animation is active.
   if (showTraj && trajAnimationActive && trajCurveTorus && trajCurve2d) {
-    trajAnimationProgress += 0.005;
+    trajAnimationProgress += 0.002;   // sets the animation speed
     if (trajAnimationProgress >= 1) {
       trajAnimationProgress = 1;
       trajAnimationActive = false;
