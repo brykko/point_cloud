@@ -329,14 +329,23 @@ function createFatTrajectoryLine(filteredPoints) {
   return { line: fatLine, curve: curve };
 }
 
-// Helper: Create a white disc to traverse the trajectory.
-function createTrajectoryDisc(size) {
-  const geometry = new THREE.SphereGeometry(0.05, 16, 16);
-  const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  const disc = new THREE.Mesh(geometry, material);
-  disc.scale.set(size, size, size);
-  return disc;
-}
+// Create a circular texture for the sprite (or load one)
+const circleCanvas = document.createElement('canvas');
+circleCanvas.width = 128;
+circleCanvas.height = 128;
+const ctxCircle = circleCanvas.getContext('2d');
+ctxCircle.beginPath();
+ctxCircle.arc(64, 64, 60, 0, Math.PI * 2);
+ctxCircle.fillStyle = '#ffffff';
+ctxCircle.fill();
+const circleTexture = new THREE.CanvasTexture(circleCanvas);
+
+// Create a sprite material using the circle texture
+const spriteMaterial = new THREE.SpriteMaterial({
+  map: circleTexture,
+  color: 0xffffff,
+  transparent: true
+});
 
 // Parameters for trajectory extraction.
 const TRAJECTORY_START = 50;
@@ -400,7 +409,9 @@ loadPointCloud(sceneTorus, './points_umap.json', false, materialTorus)
       const trajTorusObj = createTrajectory(sceneTorus, positions);
       trajLineTorus = trajTorusObj.line;
       trajCurveTorus = trajTorusObj.curve;
-      discTorus = createTrajectoryDisc(10);
+      // discTorus = createTrajectoryDisc(10);
+      discTorus = new THREE.Sprite(spriteMaterial);
+      discTorus.scale.set(1, 1, 1);
       // Start disc at beginning of the trajectory curve.
       discTorus.position.copy(trajCurveTorus.getPoint(0));
       sceneTorus.add(discTorus);
@@ -417,7 +428,9 @@ loadPointCloud(scene2d, './points_2d.json', true, material2d)
       const traj2dObj = createTrajectory(scene2d, positions);
       trajLine2d = traj2dObj.line;
       trajCurve2d = traj2dObj.curve;
-      disc2d = createTrajectoryDisc(1);
+      // disc2d = createTrajectoryDisc(1);
+      disc2d = new THREE.Sprite(spriteMaterial);
+      disc2d.scale.set(0.1, 0.1, 0.1);
       disc2d.position.copy(trajCurve2d.getPoint(0));
       scene2d.add(disc2d);
     }
@@ -644,7 +657,6 @@ function animate() {
     const point2d = trajCurve2d.getPoint(trajAnimationProgress);
     if (discTorus){
       discTorus.position.copy(pointTorus);
-      discTorus.lookAt(cameraTorus);
     }
     if (disc2d) disc2d.position.copy(point2d);
   }
