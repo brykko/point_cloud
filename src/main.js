@@ -36,7 +36,7 @@ let thumbnailElements = {};
 
 let trajAnimationActive = false;
 let trajAnimationProgress = 0.0;
-const TRAJECTORY_START = 10630;
+const TRAJECTORY_START = 10633;
 const TRAJECTORY_COUNT = 16;
 
 const DEFAULT_COLOR_DIM = 0;
@@ -113,9 +113,9 @@ function createTrajectoryHelper(scene, positions) {
   // 1. Extract a segment from the positions data (assumed same for both scenes).
   const segment = getTrajectorySegment(positions, TRAJECTORY_START, TRAJECTORY_COUNT);
   // 2. Denoise the segment with a 3-point moving median filter.
-  const filteredSegment = medianFilter(segment);
+  // const filteredSegment = medianFilter(segment);
   // 3. Create a fat line from the filtered segment using a CatmullRom spline for smoothness.
-  const { line, curve } = createFatTrajectoryLine(filteredSegment);
+  const { line, curve } = createFatTrajectoryLine(segment);
   // Add the trajectory line to the scene.
   scene.add(line);
   return { line, curve };
