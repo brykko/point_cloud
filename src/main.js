@@ -12,6 +12,9 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import {loadJSON, loadBinary, viridisColormap, hsvColormapCircular, hotColormap, coolColormap, magentaColormap, setDrawRect, softGlowTexture, spriteMaterial } from './utils/utils.js';
 
 
+// TODO:
+// Fix rat sprite alignment
+
 // ─── URL PARAMETERS: SHOW UI CONTROLS ─────────────────────────────────────────
 const urlParams = new URLSearchParams(window.location.search);
 const showGridBtns = urlParams.get('showGridBtns') === 'true';
@@ -33,8 +36,8 @@ let thumbnailElements = {};
 
 let trajAnimationActive = false;
 let trajAnimationProgress = 0.0;
-const TRAJECTORY_START = 5000;
-const TRAJECTORY_COUNT = 20;
+const TRAJECTORY_START = 10630;
+const TRAJECTORY_COUNT = 16;
 
 const DEFAULT_COLOR_DIM = 0;
 
@@ -285,7 +288,21 @@ class SceneView {
     trajObj.line.visible = trajVisible;
     this.trajectory = trajObj;
     // Create a disc sprite for this trajectory.
-    const disc = new THREE.Sprite(spriteMaterial);
+    // const disc = new THREE.Sprite(spriteMaterial);
+    let disc;
+    if (this.config.is2D && this.config.ratTextureURL) {
+      const ratTexture = new THREE.TextureLoader().load(this.config.ratTextureURL);
+      const ratSpriteMaterial = new THREE.SpriteMaterial({ 
+        map: ratTexture,
+        transparent: true
+      });
+      // ratSpriteMaterial.center = new THREE.Vector2(0, 0);
+      disc = new THREE.Sprite(ratSpriteMaterial);
+    } else {
+      // Use the default sprite (white disc) for non-2d scenes.
+      disc = new THREE.Sprite(spriteMaterial);
+    }
+
     disc.scale.copy(this.config.discScale);
     disc.position.copy(trajObj.curve.getPoint(0));
     // Ensure the disc always renders on top.
@@ -301,6 +318,15 @@ class SceneView {
     if (this.trajectory && this.disc) {
       const pt = this.trajectory.curve.getPoint(progress);
       this.disc.position.copy(pt);
+
+      if (this.config.is2D) {
+        // Get the tangent vector along the curve.
+        const tangent = this.trajectory.curve.getTangent(progress);
+        // Compute the angle; subtract PI/2 if needed because our rat image is oriented with its spine along y.
+        const angle = Math.atan2(tangent.y, tangent.x) - Math.PI / 2;
+        this.disc.material.rotation = angle;
+      }
+
     }
   }
   
@@ -337,11 +363,11 @@ const torusConfig = {
     depthWrite: false
   }),
   bloomStrength: 0.5,
-  fov: 120,
+  fov: 100,
   aspect: window.innerWidth / (2 * window.innerHeight),
   near: 0.1,
   far: 1000,
-  cameraPosition: new THREE.Vector3(3, -6, 3),
+  cameraPosition: new THREE.Vector3(4, -8, 4),
   autoRotate: true,
   autoRotateSpeed: 1,
   enablePan: false,
@@ -372,8 +398,9 @@ const view2dConfig = {
   enablePan: false,
   enableZoom: false,
   enableRotate: false,
-  discScale: new THREE.Vector3(0.1, 0.1, 0.1),
-  basePointSize: 0.000075 * 1.75
+  discScale: new THREE.Vector3(0.25, 0.4, 0.25),
+  basePointSize: 0.000075 * 1.75,
+  ratTextureURL: 'Rat_Top_by_GC.svg'
 };
 
 
@@ -507,7 +534,8 @@ function setupTrajectoryButtons() {
     sceneViews.forEach(view => {
       view.trajectory.line.visible = trajVisible;
       view.disc.visible = trajVisible;
-    })
+    });
+    updateAllScenesColors();
   });
   trajContainer.appendChild(toggleTrajBtn);
   
@@ -538,12 +566,18 @@ async function updateAllScenesColors() {
   await viewTorus.updateColors();
   await view2d.updateColors();
 
-  if (currentColorMode === 'gridCell') {
-    viewTorus.bloomPass.strength = 1.5;
-    view2d.bloomPass.strength = 3;
+  if (trajVisible){
+    // Disable bloom when showing traj
+    viewTorus.bloomPass.strength = 0;
+    view2d.bloomPass.strength = 0;
   } else {
-    viewTorus.bloomPass.strength = 0.5;
-    view2d.bloomPass.strength = 1.0;
+    if (currentColorMode === 'gridCell') {
+      viewTorus.bloomPass.strength = 1.5;
+      view2d.bloomPass.strength = 3;
+    } else {
+      viewTorus.bloomPass.strength = 0.5;
+      view2d.bloomPass.strength = 1.0;
+    }
   }
 
 }
@@ -592,6 +626,13 @@ function animate() {
     if (defaultColors) {
       updateAllScenesColors() // apply default colors to point-cloud plots 
       onWindowResize() // set proportions
+
+      // const disc = view2d.disc;
+      // if (disc) {
+      //   disc.material.map.center.set(200, 0.85);
+      //   // console.log(disc.material);
+      // }
+
       initialized = true;
     } else {
       return;
