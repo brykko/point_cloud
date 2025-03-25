@@ -134,3 +134,6 @@ export function setDrawRect(windowObj, renderer, composer, isHorz, numDivs, tile
 
 // ----- Other misc helpers ----- 
 
+export function parseUrlBoolOption(urlParams, name, defval) {
+  return  parseInt(urlParams.get(name) || defval);
+}

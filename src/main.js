@@ -9,7 +9,9 @@ import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 
 // My utils module – contains data loading, color maps, and setDrawRect
-import {loadJSON, loadBinary, viridisColormap, hsvColormapCircular, hotColormap, coolColormap, magentaColormap, setDrawRect, softGlowTexture, spriteMaterial } from './utils/utils.js';
+import {loadJSON, loadBinary, viridisColormap, hsvColormapCircular, hotColormap, 
+  coolColormap, magentaColormap, setDrawRect, softGlowTexture, spriteMaterial, parseUrlBoolOption
+} from './utils/utils.js';
 
 
 // TODO:
@@ -17,10 +19,17 @@ import {loadJSON, loadBinary, viridisColormap, hsvColormapCircular, hotColormap,
 
 // ─── URL PARAMETERS: SHOW UI CONTROLS ─────────────────────────────────────────
 const urlParams = new URLSearchParams(window.location.search);
-const showGridBtns = urlParams.get('showGridBtns') === 'true';
-const showPhaseBtns = urlParams.get('showPhaseBtns') === 'true';
-const showTrajBtns = urlParams.get('showTrajBtns') === 'true';
-let trajVisible = urlParams.get('trajVisible') === 'true'; // initial traj visibility state
+const showGridBtns = parseUrlBoolOption(urlParams, 'showGridBtns', '1')
+const showPhaseBtns = parseUrlBoolOption(urlParams, 'showPhaseBtns', '1');
+const showTrajBtns = parseUrlBoolOption(urlParams, 'showTrajBtns', '1');
+const showViewTorus = parseUrlBoolOption(urlParams, 'showViewTorus', '1');
+const showView2d = parseUrlBoolOption(urlParams, 'showView2d', '1');
+
+let numViews = 0;
+if (showViewTorus) numViews++;
+if (showView2d) numViews++;
+
+let trajVisible = urlParams.get('trajVisible') === '1'; // initial traj visibility state
 
 console.log(trajVisible);
 
@@ -210,20 +219,22 @@ class SceneView {
     this.camera.updateProjectionMatrix();
     
     // Create composer and bloom pass using the provided config.
-    const { composer, bloomPass } = this.createBloomPass(renderer, this.scene, this.camera, config.bloomStrength);
+    this.baseBloomStrength = config.baseBloomStrength;
+    const { composer, bloomPass } = this.createBloomPass(renderer, this.scene, this.camera);
     this.composer = composer;
     this.bloomPass = bloomPass;
 
     this.basePointSize = config.basePointSize;
     
     // Create OrbitControls.
-    this.controls = new OrbitControls(this.camera, renderer.domElement);
-    this.controls.enableDamping = true;
-    this.controls.autoRotate = config.autoRotate;
-    this.controls.autoRotateSpeed = config.autoRotateSpeed;
-    this.controls.enablePan = config.enablePan;
-    this.controls.enableZoom = config.enableZoom;
-    this.controls.enableRotate = config.enableRotate;
+    const controls = new OrbitControls(this.camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.autoRotate = config.autoRotate;
+    controls.autoRotateSpeed = config.autoRotateSpeed;
+    controls.enablePan = config.enablePan;
+    controls.enableZoom = config.enableZoom;
+    controls.enableRotate = config.enableRotate;
+    this.controls = controls;
     
     // To be set later.
     this.pointCloud = null;
@@ -235,10 +246,14 @@ class SceneView {
   createBloomPass(strength) {
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(this.scene, this.camera));
-    const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), strength, 0.3, 0.0);
+    const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), this.baseBloomStrength, 0.3, 0.0);
     composer.addPass(bloomPass);
     composer.setSize(window.innerWidth / 2, window.innerHeight);
     return { composer, bloomPass };
+  }
+
+  setBloomStrength(multiplier) {
+    this.bloomPass.strength = this.baseBloomStrength * multiplier;
   }
   
   // Load the point cloud and store positions.
@@ -332,7 +347,7 @@ class SceneView {
   
   // Render the scene via the composer.
   render(tileIndex) {
-    const nTiles = (isHorzStacked) ? 2 : 3;
+    const nTiles = numViews + ((isHorzStacked) ? 0 : 1);
     const tsz = setDrawRect(window, renderer, this.composer, isHorzStacked, nTiles, tileIndex, 0.5);
     this.pointCloud.material.size = this.basePointSize * Math.sqrt(tsz);
     this.composer.render();
@@ -347,16 +362,12 @@ class SceneView {
 
 // ─── CONFIGURATION OBJECTS FOR THE TWO SCENES ───────────────────────────────
 
-const BASE_POINT_SIZE_TORUS = 0.00075 * 1.75;
-const BASE_POINT_SIZE_2D = 0.000075 * 1.75;
-
 // Torus scene configuration.
 const torusConfig = {
   is2D: false,
   pointFile: './points_umap.json',
   material: new THREE.PointsMaterial({ 
     vertexColors: true,
-    size: BASE_POINT_SIZE_TORUS,
     map: softGlowTexture,
     transparent: true,
     blending: THREE.AdditiveBlending,
@@ -374,7 +385,8 @@ const torusConfig = {
   enableZoom: true,
   enableRotate: true,
   discScale: new THREE.Vector3(1, 1, 1),
-  basePointSize: 0.00075 * 1.75
+  basePointSize: 0.00075 * 1.75,
+  baseBloomStrength: 1
 };
 
 // 2d scene configuration.
@@ -382,7 +394,6 @@ const view2dConfig = {
   is2D: true,
   pointFile: './points_2d.json',
   material: new THREE.PointsMaterial({
-    size: BASE_POINT_SIZE_2D,
     vertexColors: true,
     map: softGlowTexture,
     transparent: true
@@ -399,8 +410,9 @@ const view2dConfig = {
   enableZoom: false,
   enableRotate: false,
   discScale: new THREE.Vector3(0.25, 0.4, 0.25),
-  basePointSize: 0.000075 * 1.75,
-  ratTextureURL: 'Rat_Top_by_GC.svg'
+  basePointSize: 0.00005 * 1.75,
+  ratTextureURL: 'Rat_Top_by_GC.svg',
+  baseBloomStrength: 2
 };
 
 
@@ -437,7 +449,6 @@ Promise.all([
   }
 
 });
-
 
 // ─── CONSOLIDATED UI HANDLING ───────────────────────────────────────────────
 // For grid-cell thumbnails and phase mode buttons, we use your existing UI functions
@@ -486,15 +497,15 @@ function setupThumbnails() {
 }
 
 function setupPhaseModeButtons() {
-  const phaseContainer = document.createElement('div');
-  phaseContainer.id = 'phaseButtonContainer';
-  phaseContainer.style.position = 'absolute';
-  phaseContainer.style.left = '50%';
-  phaseContainer.style.transform = 'translateX(-50%)';
-  phaseContainer.style.display = 'flex';
-  phaseContainer.style.gap = '10px';
-  phaseContainer.style.justifyContent = 'center';
-  document.body.appendChild(phaseContainer);
+  const container = document.createElement('div');
+  container.id = 'phaseButtonContainer';
+  container.style.position = 'absolute';
+  container.style.left = '50%';
+  container.style.transform = 'translateX(-50%)';
+  container.style.display = 'flex';
+  container.style.gap = '10px';
+  container.style.justifyContent = 'center';
+  document.body.appendChild(container);
 
   ['phase1', 'phase2', 'phase3'].forEach(mode => {
     const btn = document.createElement('button');
@@ -503,7 +514,7 @@ function setupPhaseModeButtons() {
       currentColorMode = mode;
       updateAllScenesColors();
     });
-    phaseContainer.appendChild(btn);
+    container.appendChild(btn);
   });
   
   const defaultBtn = document.createElement('button');
@@ -512,19 +523,19 @@ function setupPhaseModeButtons() {
     currentColorMode = 'default';
     updateAllScenesColors();
   });
-  phaseContainer.appendChild(defaultBtn);
+  container.appendChild(defaultBtn);
 }
 
 function setupTrajectoryButtons() {
-  const trajContainer = document.createElement('div');
-  trajContainer.id = 'trajButtonContainer';
-  trajContainer.style.position = 'absolute';
-  trajContainer.style.right = '10px';
-  trajContainer.style.bottom = '10px';
-  trajContainer.style.display = 'flex';
-  trajContainer.style.flexDirection = 'column';
-  trajContainer.style.gap = '10px';
-  document.body.appendChild(trajContainer);
+  const container = document.createElement('div');
+  container.id = 'trajButtonContainer';
+  container.style.position = 'absolute';
+  container.style.right = '10px';
+  container.style.bottom = '10px';
+  container.style.display = 'flex';
+  container.style.flexDirection = 'column';
+  container.style.gap = '10px';
+  document.body.appendChild(container);
   
   const toggleTrajBtn = document.createElement('button');
   toggleTrajBtn.textContent = 'Toggle Trajectory';
@@ -537,7 +548,7 @@ function setupTrajectoryButtons() {
     });
     updateAllScenesColors();
   });
-  trajContainer.appendChild(toggleTrajBtn);
+  container.appendChild(toggleTrajBtn);
   
   const animateTrajBtn = document.createElement('button');
   animateTrajBtn.textContent = 'Animate Trajectory';
@@ -547,7 +558,7 @@ function setupTrajectoryButtons() {
       trajAnimationProgress = 0;
     }
   });
-  trajContainer.appendChild(animateTrajBtn);
+  container.appendChild(animateTrajBtn);
 }
 
 function updateThumbnailBorders() {
@@ -568,15 +579,15 @@ async function updateAllScenesColors() {
 
   if (trajVisible){
     // Disable bloom when showing traj
-    viewTorus.bloomPass.strength = 0;
-    view2d.bloomPass.strength = 0;
+    viewTorus.setBloomStrength(0);
+    view2d.setBloomStrength(0);
   } else {
     if (currentColorMode === 'gridCell') {
-      viewTorus.bloomPass.strength = 1.5;
-      view2d.bloomPass.strength = 3;
+      viewTorus.setBloomStrength(1.5);
+      view2d.setBloomStrength(1.5);
     } else {
-      viewTorus.bloomPass.strength = 0.5;
-      view2d.bloomPass.strength = 1.0;
+      viewTorus.setBloomStrength(1);
+      view2d.setBloomStrength(1);
     }
   }
 
@@ -624,14 +635,8 @@ function animate() {
   if (!initialized) {
     // Wait until data is loaded before rendering anything
     if (defaultColors) {
-      updateAllScenesColors() // apply default colors to point-cloud plots 
-      onWindowResize() // set proportions
-
-      // const disc = view2d.disc;
-      // if (disc) {
-      //   disc.material.map.center.set(200, 0.85);
-      //   // console.log(disc.material);
-      // }
+      updateAllScenesColors(); // apply default colors to point-cloud plots 
+      onWindowResize(); // set proportions
 
       initialized = true;
     } else {
@@ -653,8 +658,10 @@ function animate() {
   }
 
   renderer.setScissorTest(true);
-  viewTorus.render(0);
-  view2d.render(1);
+
+  let tile = 0;
+  if (showViewTorus) viewTorus.render(tile++);
+  if (showView2d) view2d.render(tile++);
   renderer.setScissorTest(false);
 }
 
