@@ -102,9 +102,9 @@ export const spriteMaterial = new THREE.SpriteMaterial({
 
 
 // ----- Layout Utility -----
-export function setDrawRect(windowObj, renderer, composer, isHorz, numDivs, tileIndex, centerN) {
-  const w = windowObj.innerWidth;
-  const h = windowObj.innerHeight;
+export function setDrawRect(w, h, renderer, composer, isHorz, numDivs, tileIndex, centerN) {
+  // const w = windowObj.innerWidth;
+  // const h = windowObj.innerHeight;
   let wszT = isHorz ? w : h;
   let wszN = isHorz ? h : w;
   let fracNAvailable = centerN > 0.5 ? (1 - centerN) * 2 : (centerN < 0.5 ? centerN * 2 : 1);

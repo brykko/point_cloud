@@ -56,7 +56,16 @@ const colormaps = [hotColormap, coolColormap, magentaColormap];
 // Global cache for phase data (for ColorManager)
 let phaseData = null;
 
-// Helpers
+// ─── GLOBAL RENDERER SETUP ─────────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", alpha: false });
+const parentContainer = renderer.domElement.parentElement || document.body;
+renderer.setPixelRatio(window.devicePixelRatio);
+// // renderer.setSize(window.innerWidth, window.innerHeight);
+// console.log("parentContainer width:", parentContainer.clientWidth);
+// console.log("parentContainer height:", parentContainer.clientHeight);
+// renderer.setSize(parentContainer.clientWidth, parentContainer.clientHeight);
+renderer.domElement.style.backgroundColor = 'black';
+document.body.appendChild(renderer.domElement);
 
 // Extract a segment of points from a flat Float32Array of positions.
 // `positions` is a Float32Array of length (N * 3)
@@ -109,7 +118,7 @@ function createFatTrajectoryLine(filteredPoints) {
   const lineMat = new LineMaterial({
     color: 0xffffff,
     linewidth: 3,
-    resolution: new THREE.Vector2(window.innerWidth, window.innerHeight),
+    resolution: new THREE.Vector2(parentContainer.clientWidth, parentContainer.clientHeight),
     dashed: false,
   });
   const fatLine = new Line2(lineGeom, lineMat);
@@ -244,11 +253,13 @@ class SceneView {
   }
 
   createBloomPass(strength) {
+    const w = parentContainer.clientWidth;
+    const h = parentContainer.clientHeight;
     const composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(this.scene, this.camera));
-    const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), this.baseBloomStrength, 0.3, 0.0);
+    const bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), this.baseBloomStrength, 0.3, 0.0);
     composer.addPass(bloomPass);
-    composer.setSize(window.innerWidth / 2, window.innerHeight);
+    composer.setSize(w / 2, h);
     return { composer, bloomPass };
   }
 
@@ -347,8 +358,10 @@ class SceneView {
   
   // Render the scene via the composer.
   render(tileIndex) {
+    const w = parentContainer.clientWidth;
+    const h = parentContainer.clientHeight;
     const nTiles = numViews + ((isHorzStacked) ? 0 : 1);
-    const tsz = setDrawRect(window, renderer, this.composer, isHorzStacked, nTiles, tileIndex, 0.5);
+    const tsz = setDrawRect(w, h, renderer, this.composer, isHorzStacked, nTiles, tileIndex, 0.5);
     this.pointCloud.material.size = this.basePointSize * Math.sqrt(tsz);
     this.composer.render();
   }
@@ -375,7 +388,7 @@ const torusConfig = {
   }),
   bloomStrength: 0.5,
   fov: 100,
-  aspect: window.innerWidth / (2 * window.innerHeight),
+  aspect: parentContainer.clientWidth / (2 * parentContainer.clientHeight),
   near: 0.1,
   far: 1000,
   cameraPosition: new THREE.Vector3(4, -8, 4),
@@ -400,7 +413,7 @@ const view2dConfig = {
   }),
   bloomStrength: 1.0,
   fov: 120,
-  aspect: window.innerWidth / (2 * window.innerHeight),
+  aspect: parentContainer.clientWidth / (2 * parentContainer.clientHeight),
   near: 0.1,
   far: 1000,
   cameraPosition: new THREE.Vector3(0, 0, 0.6),
@@ -415,13 +428,6 @@ const view2dConfig = {
   baseBloomStrength: 2
 };
 
-
-// ─── GLOBAL RENDERER SETUP ─────────────────────────────────────────────────────
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", alpha: false });
-renderer.setPixelRatio(window.devicePixelRatio);
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.domElement.style.backgroundColor = 'black';
-document.body.appendChild(renderer.domElement);
 
 // ─── CREATE THE TWO SCENE VIEWS ─────────────────────────────────────────────
 const viewTorus = new SceneView(torusConfig);
@@ -607,16 +613,21 @@ if (showTrajBtns) {
 
 // ─── RESPONSIVE LAYOUT & WINDOW RESIZING ──────────────────────────────────────
 function onWindowResize() {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
+  const cnt = renderer.domElement.parentElement || document.body;
+  const w = cnt.clientWidth;
+  const h = cnt.clientHeight;
+  console.log("parentContainer width:", w);
+  console.log("parentContainer height:", h);
+  // const w = window.innerWidth;
+  // const h = window.innerHeight;
   const ASPECT_RATIO_THRESH = 1.0;
   isHorzStacked = (w / h) > ASPECT_RATIO_THRESH;
   
   // Reposition UI containers.
   let container = document.getElementById('thumbnailContainer');
-  if (container) container.style.top = `${window.innerHeight * (isHorzStacked ? 0.85 : 0.7)}px`;
+  if (container) container.style.top = `${h * (isHorzStacked ? 0.85 : 0.7)}px`;
   container = document.getElementById('phaseButtonContainer');
-  if (container) container.style.top = `${window.innerHeight * (isHorzStacked ? 0.95 : 0.8)}px`;
+  if (container) container.style.top = `${h * (isHorzStacked ? 0.95 : 0.8)}px`;
   
   renderer.setSize(w, h);
 }
