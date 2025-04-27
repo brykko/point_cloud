@@ -3,6 +3,8 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { ClearPass } from 'three/examples/jsm/postprocessing/ClearPass.js';
+
 // Import fat-line classes for thicker trajectory lines:
 import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
@@ -24,6 +26,7 @@ const showPhaseBtns = parseUrlBoolOption(urlParams, 'showPhaseBtns', '1');
 const showTrajBtns = parseUrlBoolOption(urlParams, 'showTrajBtns', '1');
 const showViewTorus = parseUrlBoolOption(urlParams, 'showViewTorus', '1');
 const showView2d = parseUrlBoolOption(urlParams, 'showView2d', '1');
+const transparentBg = parseUrlBoolOption(urlParams, 'transparentBg', '1');
 
 let numViews = 0;
 if (showViewTorus) numViews++;
@@ -57,14 +60,20 @@ const colormaps = [hotColormap, coolColormap, magentaColormap];
 let phaseData = null;
 
 // ─── GLOBAL RENDERER SETUP ─────────────────────────────────────────────────────
-const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", alpha: false });
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", alpha: transparentBg});
+// if (transparentBg) {
+  // renderer.autoClear = false;
+// }
+
 const parentContainer = renderer.domElement.parentElement || document.body;
 renderer.setPixelRatio(window.devicePixelRatio);
+
+// renderer.setClearColor(0x000000, 1); // second argument is alpha (0 = fully transparent)
 // // renderer.setSize(window.innerWidth, window.innerHeight);
 // console.log("parentContainer width:", parentContainer.clientWidth);
 // console.log("parentContainer height:", parentContainer.clientHeight);
 // renderer.setSize(parentContainer.clientWidth, parentContainer.clientHeight);
-renderer.domElement.style.backgroundColor = 'black';
+// renderer.domElement.style.backgroundColor = 'black';
 document.body.appendChild(renderer.domElement);
 
 // Extract a segment of points from a flat Float32Array of positions.
@@ -256,10 +265,39 @@ class SceneView {
     const w = parentContainer.clientWidth;
     const h = parentContainer.clientHeight;
     const composer = new EffectComposer(renderer);
-    composer.addPass(new RenderPass(this.scene, this.camera));
+
+    const renderPass = new RenderPass(this.scene, this.camera);
+    // renderPass.clearColor = new THREE.Color(0x000000);
+    // renderPass.clearAlpha = 0;              // <— zero alpha on clear
+    // renderPass.clear = false;                // ensure it still issues a clear()
+
+    composer.addPass(renderPass);
     const bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), this.baseBloomStrength, 0.3, 0.0);
-    composer.addPass(bloomPass);
+
+
+    // // Ensure all internal render targets preserve alpha
+    // bloomPass.renderTargetsHorizontal.forEach(rt => {
+    //   rt.texture.format = THREE.RGBAFormat;
+    //   rt.texture.needsUpdate = true;
+    // });
+    // bloomPass.renderTargetsVertical.forEach(rt => {
+    //   rt.texture.format = THREE.RGBAFormat;
+    //   rt.texture.needsUpdate = true;
+    // });
+    // // Also make sure the final composite pass is marked transparent
+    // bloomPass.copyUniforms[ 'opacity' ].value = 1;
+    
+
+    // // bloomPass.clear = false;
+    // composer.addPass(bloomPass);
+
+    // const clearPass = new ClearPass();
+    // clearPass.clearColor = new THREE.Color(0x000000);
+    // clearPass.clearAlpha = 0;      // fully transparent
+    // composer.addPass(clearPass);
+
     composer.setSize(w / 2, h);
+    // console.log("Composer clear color:", composer.clearColor);
     return { composer, bloomPass };
   }
 
@@ -422,7 +460,7 @@ const torusConfig = {
   enableZoom: true,
   enableRotate: true,
   discScale: new THREE.Vector3(1, 1, 1),
-  basePointSize: 0.075,
+  basePointSize: 0.075 * 1.5,
   baseBloomStrength: 1
 };
 
@@ -447,7 +485,7 @@ const view2dConfig = {
   enableZoom: false,
   enableRotate: false,
   discScale: new THREE.Vector3(0.25, 0.4, 0.25),
-  basePointSize: 0.005,
+  basePointSize: 0.005 * 1.5,
   ratTextureURL: 'Rat_Top_by_GC.svg',
   baseBloomStrength: 2
 };
@@ -648,7 +686,7 @@ function onWindowResize() {
   isHorzStacked = (w / h) > ASPECT_RATIO_THRESH;
 
   sceneViews.forEach(view => {
-    console.log("camera FOV:", view.camera.aspect);
+    // console.log("camera FOV:", view.camera.aspect);
   //   view.camera.aspect = w / h; // update camera aspect
   //   view.camera.updateProjectionMatrix(); // commit
   });
@@ -697,6 +735,9 @@ function animate() {
     }
     sceneViews.forEach(view => {view.updateTrajectoryDisc(trajAnimationProgress)});
   }
+
+  renderer.setScissorTest(false);
+  renderer.clear(true, true, true);  // clear color, depth, stencil to transparent
 
   renderer.setScissorTest(true);
 

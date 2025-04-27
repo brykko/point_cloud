@@ -125,6 +125,8 @@ export function setDrawRect(w, h, renderer, composer, isHorz, numDivs, tileIndex
     renderer.setScissor(posTileN, posTileT, tlenN, tlenT);
     renderer.setViewport(posViewN, posViewT, tlenView, tlenView);
   }
+  // renderer.clearColor(0, 0, 0, 0);  // last arg = alpha 0
+  // renderer.clear();
   if (composer) {
     composer.setSize(tlenView, tlenView);
   }
@@ -135,5 +137,5 @@ export function setDrawRect(w, h, renderer, composer, isHorz, numDivs, tileIndex
 // ----- Other misc helpers ----- 
 
 export function parseUrlBoolOption(urlParams, name, defval) {
-  return  parseInt(urlParams.get(name) || defval);
+  return  Boolean(parseInt(urlParams.get(name) || defval));
 }
