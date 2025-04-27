@@ -358,11 +358,34 @@ class SceneView {
   
   // Render the scene via the composer.
   render(tileIndex) {
+    // Calculate the tile size, based on the current window dimensions and horz/vert layout
     const w = parentContainer.clientWidth;
     const h = parentContainer.clientHeight;
     const nTiles = numViews + ((isHorzStacked) ? 0 : 1);
     const tsz = setDrawRect(w, h, renderer, this.composer, isHorzStacked, nTiles, tileIndex, 0.5);
-    this.pointCloud.material.size = this.basePointSize * Math.sqrt(tsz);
+    
+    // We now need to calculate the correct material point size. What we want is for the size to
+    // scale in proportion with the view dimensions, so preserve appearance regardless
+    // of the window size.
+    // 
+    //  There are two parts to this calculation:
+    //
+    // 1) The rendered point sizes are automatically scaled with the *height* of the renderer 
+    // (not the width!). I still don't understand why this happens. Anyway - it's crucial 
+    // that we reverse this scaling, because the renderer gets rescaled to fill the whole
+    // window (irrespective of the view sizes), and we don't want our dots to change size 
+    // independently of the view dimensions.
+    //
+    // 2) The (square) view size changes depending on a combination of the height and width
+    // We get this dimension from the output of setDrawRect().
+    //
+    // So, by reversing the auto-height scaling in (1) we can calculate a dot size that will
+    // be independent of the window dimensions. Then. we can multiply this value by the view
+    // size such that the points scale in harmony with the view.
+    const rsz = new THREE.Vector2();
+    renderer.getSize(rsz);
+    // console.log("rh:", rsz.x);
+    this.pointCloud.material.size = this.basePointSize * tsz / rsz.y; // multiply by (2), divide by (1)
     this.composer.render();
   }
   
@@ -384,7 +407,8 @@ const torusConfig = {
     map: softGlowTexture,
     transparent: true,
     blending: THREE.AdditiveBlending,
-    depthWrite: false
+    depthWrite: false,
+    sizeAttenuation: true // scales points with height of renderer(?)
   }),
   bloomStrength: 0.5,
   fov: 100,
@@ -398,7 +422,7 @@ const torusConfig = {
   enableZoom: true,
   enableRotate: true,
   discScale: new THREE.Vector3(1, 1, 1),
-  basePointSize: 0.00075 * 1.75,
+  basePointSize: 0.075,
   baseBloomStrength: 1
 };
 
@@ -423,7 +447,7 @@ const view2dConfig = {
   enableZoom: false,
   enableRotate: false,
   discScale: new THREE.Vector3(0.25, 0.4, 0.25),
-  basePointSize: 0.00005 * 1.75,
+  basePointSize: 0.005,
   ratTextureURL: 'Rat_Top_by_GC.svg',
   baseBloomStrength: 2
 };
@@ -616,12 +640,18 @@ function onWindowResize() {
   const cnt = renderer.domElement.parentElement || document.body;
   const w = cnt.clientWidth;
   const h = cnt.clientHeight;
-  console.log("parentContainer width:", w);
-  console.log("parentContainer height:", h);
+  // console.log("parentContainer width:", w);
+  // console.log("parentContainer height:", h);
   // const w = window.innerWidth;
   // const h = window.innerHeight;
   const ASPECT_RATIO_THRESH = 1.0;
   isHorzStacked = (w / h) > ASPECT_RATIO_THRESH;
+
+  sceneViews.forEach(view => {
+    console.log("camera FOV:", view.camera.aspect);
+  //   view.camera.aspect = w / h; // update camera aspect
+  //   view.camera.updateProjectionMatrix(); // commit
+  });
   
   // Reposition UI containers.
   let container = document.getElementById('thumbnailContainer');
