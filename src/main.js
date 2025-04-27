@@ -26,7 +26,7 @@ const showPhaseBtns = parseUrlBoolOption(urlParams, 'showPhaseBtns', '1');
 const showTrajBtns = parseUrlBoolOption(urlParams, 'showTrajBtns', '1');
 const showViewTorus = parseUrlBoolOption(urlParams, 'showViewTorus', '1');
 const showView2d = parseUrlBoolOption(urlParams, 'showView2d', '1');
-const transparentBg = parseUrlBoolOption(urlParams, 'transparentBg', '1');
+const transparentBg = parseUrlBoolOption(urlParams, 'transparentBg', '0');
 
 let numViews = 0;
 if (showViewTorus) numViews++;
