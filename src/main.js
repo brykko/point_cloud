@@ -27,6 +27,7 @@ const showTrajBtns = parseUrlBoolOption(urlParams, 'showTrajBtns', '1');
 const showViewTorus = parseUrlBoolOption(urlParams, 'showViewTorus', '1');
 const showView2d = parseUrlBoolOption(urlParams, 'showView2d', '1');
 const transparentBg = parseUrlBoolOption(urlParams, 'transparentBg', '0');
+const autoToggleColors = parseUrlBoolOption(urlParams, 'autoToggleColors', '0');
 
 let numViews = 0;
 if (showViewTorus) numViews++;
@@ -38,6 +39,9 @@ console.log(trajVisible);
 
 // ─── GLOBAL VARIABLES USED BY UI (COLOR MODES, SELECTIONS, ETC.) ─────────────
 let currentColorMode = 'default';
+let autoColorIndex = 0;
+let autoColorTimer = 0;
+const AUTO_COLOR_INTERVAL = 400; // number of animation frames between transitions
 let defaultColors = null;
 let selectedCells = [];
 let isHorzStacked = null;
@@ -199,6 +203,9 @@ const ColorManager = {
       // Start a transition to defaultColors
       this.startColorTransition(colorAttr.array, defaultColors);
     }
+    // sceneViews.forEach(sceneView => {
+    //   sceneView.basePointSize = BASE_POINT_SIZE_DEFAULT;
+    // })
   },
 
   applyGridCellColors: async function(points) {
@@ -215,6 +222,9 @@ const ColorManager = {
       }
     }
     // Start a transition to grid cell colors
+    // sceneViews.forEach(sceneView => {
+    //   sceneView.basePointSize = BASE_POINT_SIZE_GRID;
+    // })
     this.startColorTransition(points.geometry.attributes.color.array, colors);
   },
 
@@ -229,6 +239,9 @@ const ColorManager = {
       const [r, g, b] = hsvColormapCircular(phaseValue);
       colors.set([r, g, b], i * 3);
     }
+    // sceneViews.forEach(sceneView => {
+    //   sceneView.basePointSize = BASE_POINT_SIZE_DEFAULT;
+    // })
     // Start a transition to phase colors
     this.startColorTransition(points.geometry.attributes.color.array, colors);
   }
@@ -289,6 +302,7 @@ class SceneView {
     composer.addPass(renderPass);
     const bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), this.baseBloomStrength, 0.3, 0.0);
 
+    // The bloom pass is DISABLED for now (we create it, but don't add it to the composer).
 
     // // Ensure all internal render targets preserve alpha
     // bloomPass.renderTargetsHorizontal.forEach(rt => {
@@ -459,8 +473,8 @@ const torusConfig = {
     vertexColors: true,
     map: softGlowTexture,
     transparent: true,
-    blending: THREE.AdditiveBlending,
     depthWrite: false,
+    blending: THREE.AdditiveBlending,
     sizeAttenuation: true // scales points with height of renderer(?)
   }),
   bloomStrength: 0.5,
@@ -475,7 +489,7 @@ const torusConfig = {
   enableZoom: true,
   enableRotate: true,
   discScale: new THREE.Vector3(1, 1, 1),
-  basePointSize: 0.075 * 1.5,
+  basePointSize: 0.075 * 2,
   baseBloomStrength: 1
 };
 
@@ -486,6 +500,7 @@ const view2dConfig = {
   material: new THREE.PointsMaterial({
     vertexColors: true,
     map: softGlowTexture,
+    blending: THREE.AdditiveBlending,
     transparent: true
   }),
   bloomStrength: 1.0,
@@ -500,7 +515,7 @@ const view2dConfig = {
   enableZoom: false,
   enableRotate: false,
   discScale: new THREE.Vector3(0.25, 0.4, 0.25),
-  basePointSize: 0.005 * 1.5,
+  basePointSize: 0.006 * 2,
   ratTextureURL: 'Rat_Top_by_GC.svg',
   baseBloomStrength: 2
 };
@@ -720,6 +735,33 @@ let initialized = false;
 
 // ─── ANIMATION LOOP ──────────────────────────────────────────────────────────
 function animate() {
+
+  // ─── AUTO COLOR TOGGLING ─────────────────────────────────────
+  if (autoToggleColors && initialized) {
+    autoColorTimer++;
+    if (autoColorTimer >= AUTO_COLOR_INTERVAL) {
+      autoColorTimer = 0;
+      const allModes = ['default', 'phase1', 'phase2', 'phase3', ...Object.keys(fixedColormapMapping)];
+      autoColorIndex = (autoColorIndex + 1) % allModes.length;
+      const nextMode = allModes[autoColorIndex];
+
+      if (['phase1', 'phase2', 'phase3'].includes(nextMode)) {
+        currentColorMode = nextMode;
+        updateAllScenesColors();
+      } else if (['default'].includes(nextMode)) {
+        currentColorMode = nextMode;
+        selectedCells = [];
+        updateAllScenesColors();
+        updateThumbnailBorders();
+      } else {
+        // It's a grid cell ID
+        selectedCells = [nextMode];
+        currentColorMode = 'gridCell';
+        updateAllScenesColors();
+        updateThumbnailBorders();
+      }
+    }
+  }
 
   requestAnimationFrame(animate);
 
