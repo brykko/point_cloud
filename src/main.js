@@ -59,6 +59,13 @@ const colormaps = [hotColormap, coolColormap, magentaColormap];
 // Global cache for phase data (for ColorManager)
 let phaseData = null;
 
+// ─── GLOBAL VARIABLES FOR COLOR TRANSITIONS ──────────────────────────────
+let isTransitioning = false;
+let transitionProgress = 0;
+let startColors = null;
+let targetColors = null;
+const TRANSITION_SPEED = 0.05;
+
 // ─── GLOBAL RENDERER SETUP ─────────────────────────────────────────────────────
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", alpha: transparentBg});
 // if (transparentBg) {
@@ -157,6 +164,14 @@ const ColorManager = {
     }
   },
 
+  // Start a color transition between two color arrays
+  startColorTransition: function(currentArray, nextArray) {
+    startColors = currentArray.slice(); // clone current array
+    targetColors = nextArray;
+    transitionProgress = 0;
+    isTransitioning = true;
+  },
+
   updateColors: async function(points) {
     // If grid-cell mode but no cells are selected, revert to default.
     if (currentColorMode === 'gridCell' && selectedCells.length === 0) {
@@ -181,8 +196,8 @@ const ColorManager = {
     const pointCount = points.geometry.attributes.position.count;
     if (defaultColors) {
       const colorAttr = points.geometry.attributes.color;
-      colorAttr.array.set(defaultColors);
-      colorAttr.needsUpdate = true;
+      // Start a transition to defaultColors
+      this.startColorTransition(colorAttr.array, defaultColors);
     }
   },
 
@@ -199,8 +214,8 @@ const ColorManager = {
         colors[i * 3 + 2] += b;
       }
     }
-    points.geometry.attributes.color.array.set(colors);
-    points.geometry.attributes.color.needsUpdate = true;
+    // Start a transition to grid cell colors
+    this.startColorTransition(points.geometry.attributes.color.array, colors);
   },
 
   applyPhaseColors: async function(points, phaseMode) {
@@ -214,8 +229,8 @@ const ColorManager = {
       const [r, g, b] = hsvColormapCircular(phaseValue);
       colors.set([r, g, b], i * 3);
     }
-    points.geometry.attributes.color.array.set(colors);
-    points.geometry.attributes.color.needsUpdate = true;
+    // Start a transition to phase colors
+    this.startColorTransition(points.geometry.attributes.color.array, colors);
   }
 };
 
@@ -734,6 +749,36 @@ function animate() {
       trajAnimationActive = false;
     }
     sceneViews.forEach(view => {view.updateTrajectoryDisc(trajAnimationProgress)});
+  }
+
+  // ─── COLOR TRANSITION INTERPOLATION ─────────────────────────────
+  // Interpolate colors for smooth transitions before rendering
+  if (isTransitioning) {
+    // Interpolate for viewTorus
+    if (viewTorus.pointCloud) {
+      transitionProgress += TRANSITION_SPEED;
+      if (transitionProgress >= 1) {
+        transitionProgress = 1;
+        isTransitioning = false;
+      }
+      const t = transitionProgress;
+      const colorAttr = viewTorus.pointCloud.geometry.attributes.color;
+      for (let i = 0; i < colorAttr.array.length; i++) {
+        colorAttr.array[i] = (1 - t) * startColors[i] + t * targetColors[i];
+      }
+      colorAttr.needsUpdate = true;
+    }
+    // Interpolate for view2d
+    if (view2d.pointCloud) {
+      const colorAttr = view2d.pointCloud.geometry.attributes.color;
+      // Only interpolate if the array lengths match
+      if (colorAttr.array.length === targetColors.length) {
+        for (let i = 0; i < colorAttr.array.length; i++) {
+          colorAttr.array[i] = (1 - transitionProgress) * startColors[i] + transitionProgress * targetColors[i];
+        }
+        colorAttr.needsUpdate = true;
+      }
+    }
   }
 
   renderer.setScissorTest(false);
