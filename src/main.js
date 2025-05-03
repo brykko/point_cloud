@@ -50,6 +50,22 @@ let isHorzStacked = null;
 let fixedColormapMapping = {};
 let thumbnailElements = {};
 
+// ─── LOAD AND PARSE GRID CELL ID LIST AT TOP-LEVEL SCOPE ─────────────────────
+let allCellIDs = [];
+
+function initializeCellIDs() {
+  return fetch('cell_list_3.txt')
+    .then(response => response.text())
+    .then(text => {
+      allCellIDs = text.split('\n').map(line => line.trim()).filter(line => line !== '');
+      allCellIDs.forEach((cellID, index) => {
+        if (index < colormaps.length) {
+          fixedColormapMapping[cellID] = colormaps[index];
+        }
+      });
+    });
+}
+
 let trajAnimationActive = false;
 let trajAnimationProgress = 0.0;
 const TRAJECTORY_START = 10633;
@@ -526,8 +542,9 @@ const viewTorus = new SceneView(torusConfig);
 const view2d = new SceneView(view2dConfig);
 const sceneViews = [viewTorus, view2d];
 
-// Load point clouds for both scenes.
+// Load point clouds for both scenes, after initializing cell IDs.
 Promise.all([
+  initializeCellIDs(),
   viewTorus.loadPointCloud(),
   view2d.loadPointCloud()
 ]).then(() => {
@@ -546,6 +563,9 @@ Promise.all([
     defaultColors.set([r, g, b], i * 3);
   }
 
+  if (showGridBtns) setupThumbnails();
+  if (showPhaseBtns) setupPhaseModeButtons();
+  if (showTrajBtns) setupTrajectoryButtons();
 });
 
 // ─── CONSOLIDATED UI HANDLING ───────────────────────────────────────────────
@@ -565,33 +585,25 @@ function setupThumbnails() {
   thumbnailContainer.style.justifyContent = 'center';
   document.body.appendChild(thumbnailContainer);
 
-  fetch('cell_list_3.txt')
-    .then(response => response.text())
-    .then(text => {
-      const cellIDs = text.split('\n').map(line => line.trim()).filter(line => line !== '');
-      cellIDs.forEach((cellID, index) => {
-        const img = document.createElement('img');
-        img.src = `rm/${cellID}.png`;
-        img.style.transform = 'rotate(-90deg)';
-        img.classList.add('thumbnail');
-        if (index < colormaps.length) {
-          fixedColormapMapping[cellID] = colormaps[index];
-        }
-        img.addEventListener('click', () => {
-          // Toggle selection
-          if (selectedCells.includes(cellID)) {
-            selectedCells = selectedCells.filter(id => id !== cellID);
-          } else {
-            selectedCells.push(cellID);
-          }
-          currentColorMode = selectedCells.length === 0 ? 'default' : 'gridCell';
-          updateAllScenesColors();
-          updateThumbnailBorders();
-        });
-        thumbnailContainer.appendChild(img);
-        thumbnailElements[cellID] = img;
-      });
+  allCellIDs.forEach((cellID, index) => {
+    const img = document.createElement('img');
+    img.src = `rm/${cellID}.png`;
+    img.style.transform = 'rotate(-90deg)';
+    img.classList.add('thumbnail');
+    img.addEventListener('click', () => {
+      // Toggle selection
+      if (selectedCells.includes(cellID)) {
+        selectedCells = selectedCells.filter(id => id !== cellID);
+      } else {
+        selectedCells.push(cellID);
+      }
+      currentColorMode = selectedCells.length === 0 ? 'default' : 'gridCell';
+      updateAllScenesColors();
+      updateThumbnailBorders();
     });
+    thumbnailContainer.appendChild(img);
+    thumbnailElements[cellID] = img;
+  });
 }
 
 function setupPhaseModeButtons() {
@@ -691,16 +703,7 @@ async function updateAllScenesColors() {
 
 }
 
-// Only set up the UI if enabled via URL parameters.
-if (showGridBtns) {
-  setupThumbnails();
-}
-if (showPhaseBtns) {
-  setupPhaseModeButtons();
-}
-if (showTrajBtns) {
-  setupTrajectoryButtons();
-}
+// UI setup is now handled after initialization in the Promise.all() above.
 
 
 // ─── RESPONSIVE LAYOUT & WINDOW RESIZING ──────────────────────────────────────
