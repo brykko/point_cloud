@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { EffectComposer, RenderPass, EffectPass, BloomEffect } from 'postprocessing';
+import { EffectComposer, RenderPass, EffectPass, BloomEffect, BlendFunction} from 'postprocessing';
 
 // Import fat-line classes for thicker trajectory lines:
 import { Line2 } from 'three/examples/jsm/lines/Line2.js';
@@ -307,8 +307,10 @@ class SceneView {
     const composer = new EffectComposer(renderer);
     const renderPass = new RenderPass(this.scene, this.camera);
     const bloomEffect = new BloomEffect({
-      luminanceThreshold: 0.0,
-      luminanceSmoothing: 0.5,
+      mipmapBlur: false,
+      radius: 0,
+      luminanceThreshold: 0,
+      luminanceSmoothing: 0.025,
       intensity: this.baseBloomStrength,
     });
     const effectPass = new EffectPass(this.camera, bloomEffect);
@@ -480,7 +482,7 @@ const torusConfig = {
   enableRotate: true,
   discScale: new THREE.Vector3(1, 1, 1),
   basePointSize: 0.075 * 1.5,
-  baseBloomStrength: 20
+  baseBloomStrength: 5
 };
 
 // 2d scene configuration.
@@ -662,7 +664,8 @@ async function updateAllScenesColors() {
 
   if (trajVisible){
     // Disable bloom when showing traj
-    viewTorus.setBloomStrength(0);
+    viewTorus.
+    Strength(0);
     view2d.setBloomStrength(0);
   } else {
     if (currentColorMode === 'gridCell') {
