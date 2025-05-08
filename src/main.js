@@ -474,7 +474,7 @@ const torusConfig = {
   aspect: parentContainer.clientWidth / (2 * parentContainer.clientHeight),
   near: 0.1,
   far: 1000,
-  cameraPosition: new THREE.Vector3(4, -8, 4),
+  cameraPosition: new THREE.Vector3(3.5, -7, 3.5),
   autoRotate: true,
   autoRotateSpeed: 1,
   enablePan: false,
