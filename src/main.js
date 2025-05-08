@@ -1,9 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { ClearPass } from 'three/examples/jsm/postprocessing/ClearPass.js';
+import { EffectComposer, RenderPass, EffectPass, BloomEffect } from 'postprocessing';
 
 // Import fat-line classes for thicker trajectory lines:
 import { Line2 } from 'three/examples/jsm/lines/Line2.js';
@@ -12,7 +9,8 @@ import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 
 // My utils module – contains data loading, color maps, and setDrawRect
 import {loadJSON, loadBinary, viridisColormap, hsvColormapCircular, hotColormap, 
-  coolColormap, magentaColormap, setDrawRect, softGlowTexture, spriteMaterial, parseUrlBoolOption
+  coolColormap, magentaColormap, setDrawRect, calcViewTileSize,
+  softGlowTexture, spriteMaterial, parseUrlBoolOption
 } from './utils/utils.js';
 
 
@@ -282,7 +280,7 @@ class SceneView {
     
     // Create composer and bloom pass using the provided config.
     this.baseBloomStrength = config.baseBloomStrength;
-    const { composer, bloomPass } = this.createBloomPass(renderer, this.scene, this.camera);
+    const { composer, bloomPass } = this.createBloomPass();
     this.composer = composer;
     this.bloomPass = bloomPass;
 
@@ -306,48 +304,24 @@ class SceneView {
   }
 
   createBloomPass(strength) {
-    const w = parentContainer.clientWidth;
-    const h = parentContainer.clientHeight;
     const composer = new EffectComposer(renderer);
-
     const renderPass = new RenderPass(this.scene, this.camera);
-    // renderPass.clearColor = new THREE.Color(0x000000);
-    // renderPass.clearAlpha = 0;              // <— zero alpha on clear
-    // renderPass.clear = false;                // ensure it still issues a clear()
-
+    const bloomEffect = new BloomEffect({
+      luminanceThreshold: 0.0,
+      luminanceSmoothing: 0.5,
+      intensity: this.baseBloomStrength,
+    });
+    const effectPass = new EffectPass(this.camera, bloomEffect);
+    effectPass.renderToScreen = true;
     composer.addPass(renderPass);
-    const bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), this.baseBloomStrength, 0.3, 0.0);
-
-    // The bloom pass is DISABLED for now (we create it, but don't add it to the composer).
-
-    // // Ensure all internal render targets preserve alpha
-    // bloomPass.renderTargetsHorizontal.forEach(rt => {
-    //   rt.texture.format = THREE.RGBAFormat;
-    //   rt.texture.needsUpdate = true;
-    // });
-    // bloomPass.renderTargetsVertical.forEach(rt => {
-    //   rt.texture.format = THREE.RGBAFormat;
-    //   rt.texture.needsUpdate = true;
-    // });
-    // // Also make sure the final composite pass is marked transparent
-    // bloomPass.copyUniforms[ 'opacity' ].value = 1;
-    
-
-    // // bloomPass.clear = false;
-    // composer.addPass(bloomPass);
-
-    // const clearPass = new ClearPass();
-    // clearPass.clearColor = new THREE.Color(0x000000);
-    // clearPass.clearAlpha = 0;      // fully transparent
-    // composer.addPass(clearPass);
-
-    composer.setSize(w / 2, h);
-    // console.log("Composer clear color:", composer.clearColor);
-    return { composer, bloomPass };
+    composer.addPass(effectPass);
+    composer.setSize(parentContainer.clientWidth / 2, parentContainer.clientHeight);
+    // composer.setSize(305, 305);
+    return { composer, bloomPass: bloomEffect };
   }
 
   setBloomStrength(multiplier) {
-    this.bloomPass.strength = this.baseBloomStrength * multiplier;
+    this.bloomPass.intensity = this.baseBloomStrength * multiplier;
   }
   
   // Load the point cloud and store positions.
@@ -469,6 +443,7 @@ class SceneView {
     renderer.getSize(rsz);
     // console.log("rh:", rsz.x);
     this.pointCloud.material.size = this.basePointSize * tsz / rsz.y; // multiply by (2), divide by (1)
+    // this.composer.setSize(500, 500); % 
     this.composer.render();
   }
   
@@ -493,7 +468,6 @@ const torusConfig = {
     blending: THREE.AdditiveBlending,
     sizeAttenuation: true // scales points with height of renderer(?)
   }),
-  bloomStrength: 0.5,
   fov: 100,
   aspect: parentContainer.clientWidth / (2 * parentContainer.clientHeight),
   near: 0.1,
@@ -505,8 +479,8 @@ const torusConfig = {
   enableZoom: true,
   enableRotate: true,
   discScale: new THREE.Vector3(1, 1, 1),
-  basePointSize: 0.075 * 2,
-  baseBloomStrength: 1
+  basePointSize: 0.075 * 1.5,
+  baseBloomStrength: 20
 };
 
 // 2d scene configuration.
@@ -519,7 +493,6 @@ const view2dConfig = {
     blending: THREE.AdditiveBlending,
     transparent: true
   }),
-  bloomStrength: 1.0,
   fov: 120,
   aspect: parentContainer.clientWidth / (2 * parentContainer.clientHeight),
   near: 0.1,
@@ -531,7 +504,7 @@ const view2dConfig = {
   enableZoom: false,
   enableRotate: false,
   discScale: new THREE.Vector3(0.25, 0.4, 0.25),
-  basePointSize: 0.006 * 2,
+  basePointSize: 0.006 * 1.5,
   ratTextureURL: 'Rat_Top_by_GC.svg',
   baseBloomStrength: 2
 };
@@ -718,10 +691,15 @@ function onWindowResize() {
   const ASPECT_RATIO_THRESH = 1.0;
   isHorzStacked = (w / h) > ASPECT_RATIO_THRESH;
 
+  const nTiles = numViews + ((isHorzStacked) ? 0 : 1);
+  const tileSize = calcViewTileSize(w, h, isHorzStacked, nTiles, 0.5);
+  const viewSize = tileSize.view;
+
   sceneViews.forEach(view => {
     // console.log("camera FOV:", view.camera.aspect);
   //   view.camera.aspect = w / h; // update camera aspect
   //   view.camera.updateProjectionMatrix(); // commit
+    view.composer.setSize(viewSize, viewSize)
   });
   
   // Reposition UI containers.
@@ -731,6 +709,7 @@ function onWindowResize() {
   if (container) container.style.top = `${h * (isHorzStacked ? 0.95 : 0.8)}px`;
   
   renderer.setSize(w, h);
+
 }
 window.addEventListener('resize', onWindowResize);
 

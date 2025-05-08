@@ -51,19 +51,26 @@ export function hsvToRgb(h, s, v) {
   return [r + m, g + m, b + m];
 }
 
+function cscale(multiplier, offset, value) {
+  return Math.max(0, Math.min(1, value * multiplier + offset))
+}
+
 export function hotColormap(value) {
   let t = Math.max(0, Math.min(1, value));
-  return [Math.min(1, t * 2), Math.max(0, Math.min(1, t * 3 - 1)), 0];
+  // return [Math.min(1, t * 2), Math.max(0, Math.min(1, t * 3 - 1)), 0];
+  return [cscale(2, 0, t), cscale(3, -1, t), 0];
 }
 
 export function coolColormap(value) {
   let t = Math.max(0, Math.min(1, value));
-  return [0, Math.max(0, Math.min(1, t * 3 - 1)), Math.min(1, t * 3)];
+  // return [0, Math.max(0, Math.min(1, t * 3 - 1)), Math.min(1, t * 3)];
+  return [0, cscale(3, -1, t), cscale(3, 0, t)];
 }
 
 export function magentaColormap(value) {
   let t = Math.max(0, Math.min(1, value));
-  return [Math.max(0, Math.min(1, t * 3 - 1)), 0, Math.max(0, Math.min(1, t * 2 - 1))];
+  // return [Math.max(0, Math.min(1, t * 3 - 1)), 0, Math.max(0, Math.min(1, t * 2 - 1))];
+  return [cscale(5, -1, t), cscale(2, -1, t), cscale(5, -1, t)];
 }
 
 
@@ -101,10 +108,7 @@ export const spriteMaterial = new THREE.SpriteMaterial({
   transparent: true});
 
 
-// ----- Layout Utility -----
-export function setDrawRect(w, h, renderer, composer, isHorz, numDivs, tileIndex, centerN) {
-  // const w = windowObj.innerWidth;
-  // const h = windowObj.innerHeight;
+export function calcViewTileSize(w, h, isHorz, numDivs, centerN) {
   let wszT = isHorz ? w : h;
   let wszN = isHorz ? h : w;
   let fracNAvailable = centerN > 0.5 ? (1 - centerN) * 2 : (centerN < 0.5 ? centerN * 2 : 1);
@@ -112,6 +116,26 @@ export function setDrawRect(w, h, renderer, composer, isHorz, numDivs, tileIndex
   const tlenT = wszT / numDivs;
   const tlenN = wszN;
   const tlenView = Math.min(tlenT, wszNAvailable);
+  return {view:tlenView, dimN:tlenN, dimT:tlenT}
+}
+
+// ----- Layout Utility -----
+export function setDrawRect(w, h, renderer, composer, isHorz, numDivs, tileIndex, centerN) {
+  // const w = windowObj.innerWidth;
+  // const h = windowObj.innerHeight;
+  // let wszT = isHorz ? w : h;
+  // let wszN = isHorz ? h : w;
+  // let fracNAvailable = centerN > 0.5 ? (1 - centerN) * 2 : (centerN < 0.5 ? centerN * 2 : 1);
+  // const wszNAvailable = wszN * fracNAvailable;
+  // const tlenT = wszT / numDivs;
+  // const tlenN = wszN;
+  // const tlenView = Math.min(tlenT, wszNAvailable);
+
+  const sz = calcViewTileSize(w, h, isHorz, numDivs, centerN);
+  const tlenT = sz.dimT;
+  const tlenN = sz.dimN;
+  const tlenView = sz.view;
+
   const viewTileOffsetT = (tlenT - tlenView) / 2;
   const viewTileOffsetN = (tlenN - tlenView) * centerN;
   const posTileT = isHorz ? (tileIndex * tlenT) : ((numDivs - tileIndex - 1) * tlenT);
@@ -127,8 +151,9 @@ export function setDrawRect(w, h, renderer, composer, isHorz, numDivs, tileIndex
   }
   // renderer.clearColor(0, 0, 0, 0);  // last arg = alpha 0
   // renderer.clear();
+  // console.log("tlenView:", tlenView);
   if (composer) {
-    composer.setSize(tlenView, tlenView);
+    // composer.setSize(tlenView, tlenView);
   }
   return tlenView;
 }
