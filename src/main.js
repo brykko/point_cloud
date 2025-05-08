@@ -482,7 +482,7 @@ const torusConfig = {
   enableRotate: true,
   discScale: new THREE.Vector3(1, 1, 1),
   basePointSize: 0.075 * 1.5,
-  baseBloomStrength: 5
+  baseBloomStrength: 2
 };
 
 // 2d scene configuration.
